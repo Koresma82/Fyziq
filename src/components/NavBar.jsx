@@ -3,12 +3,13 @@ import { useAuth } from "../contexts/AuthContext";
 import { theme } from "../config/theme";
 
 export default function NavBar() {
-  const { profile, isAdmin, logout } = useAuth();
+  const { profile, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const t = theme;
 
   const initials = (n) => n ? n.split(" ").map(w => w[0]).join("").slice(0,2).toUpperCase() : "?";
+  const inDetail = location.pathname.startsWith("/patient/");
 
   return (
     <nav style={{
@@ -22,34 +23,23 @@ export default function NavBar() {
     }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');`}</style>
 
-      {/* Logo mark */}
       <button onClick={() => navigate("/")} style={{
         display: "flex", alignItems: "center", gap: 9,
         background: "none", border: "none", cursor: "pointer", padding: 0,
       }}>
         <img src="/favicon.svg" alt="" width="34" height="34" style={{ borderRadius: 9 }} />
-        <span style={{
-          fontSize: 20, fontWeight: 800, color: t.navy, letterSpacing: -0.5,
-        }}>Fyziq</span>
-        {isAdmin && (
-          <span style={{
-            fontSize: 9.5, fontWeight: 800, letterSpacing: 1,
-            color: t.teal, background: t.gradientSoft,
-            border: `1px solid rgba(26,159,198,0.25)`,
-            padding: "2px 7px", borderRadius: 7, marginLeft: 2,
-          }}>ADMIN</span>
-        )}
+        <span style={{ fontSize: 20, fontWeight: 800, color: t.navy, letterSpacing: -0.5 }}>Fyziq</span>
       </button>
 
       <div style={{ flex: 1 }} />
 
-      {isAdmin && location.pathname.startsWith("/user/") && (
+      {inDetail && (
         <button onClick={() => navigate("/")} style={{
           background: t.cardAlt, border: `1px solid ${t.border}`,
           borderRadius: t.rSm, padding: "7px 14px",
           color: t.textMid, fontSize: 13, fontWeight: 600,
           cursor: "pointer", fontFamily: t.font, marginRight: 10,
-        }}>← Utilizadores</button>
+        }}>← Pacientes</button>
       )}
 
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

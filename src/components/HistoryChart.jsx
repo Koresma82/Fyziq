@@ -44,7 +44,7 @@ export default function HistoryChart({ analyses }) {
       date:   fmt(a.date),
       imc:    a.metrics?.imc,
       bf:     a.metrics?.bf,
-      weight: a.userSnapshot?.weight,
+      weight: a.patientSnapshot?.weight,
     }));
 
   const charts = [

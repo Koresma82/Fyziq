@@ -15,7 +15,7 @@ const CONNECTIONS = [
   ["left_knee","left_ankle"],["right_knee","right_ankle"],
 ];
 
-export default function AnalysisForm({ userProfile, onSave, onCancel }) {
+export default function AnalysisForm({ patientProfile, onSave, onCancel }) {
   const [step, setStep] = useState("photo");
   const [imageDataUrl, setImageDataUrl] = useState(null);
   const [mediaType, setMediaType] = useState("image/jpeg");
@@ -30,7 +30,7 @@ export default function AnalysisForm({ userProfile, onSave, onCancel }) {
   const canvasRef = useRef(null);
   const imgRef = useRef(null);
 
-  const { sex, height, weight, age } = userProfile;
+  const { sex, height, weight, age } = patientProfile;
 
   const handleFile = (file) => {
     if (!file?.type?.startsWith("image/")) return;

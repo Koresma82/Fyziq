@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 import { auth, googleProvider } from "../firebase";
-import { createOrMergeUser } from "../services/firestoreService";
+import { createOrGetProfessional } from "../services/firestoreService";
 
 const AuthContext = createContext(null);
 
@@ -13,16 +13,14 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
       if (!firebaseUser) {
-        setUser(null);
-        setProfile(null);
-        return;
+        setUser(null); setProfile(null); return;
       }
       try {
-        const prof = await createOrMergeUser(firebaseUser);
+        const prof = await createOrGetProfessional(firebaseUser);
         setUser(firebaseUser);
         setProfile(prof);
       } catch (err) {
-        console.error("Auth merge error:", err);
+        console.error("Auth error:", err);
         setError("Erro ao carregar perfil. Tenta novamente.");
         setUser(null);
       }
@@ -35,7 +33,8 @@ export function AuthProvider({ children }) {
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (err) {
-      if (err.code !== "auth/popup-closed-by-user") {
+      if (err.code !== "auth/popup-closed-by-user" &&
+          err.code !== "auth/cancelled-popup-request") {
         setError("Erro ao entrar com Google. Tenta novamente.");
       }
     }
@@ -43,11 +42,10 @@ export function AuthProvider({ children }) {
 
   const logout = () => signOut(auth);
 
-  const isAdmin = profile?.role === "admin";
   const loading = user === undefined;
 
   return (
-    <AuthContext.Provider value={{ user, profile, isAdmin, loading, error, login, logout }}>
+    <AuthContext.Provider value={{ user, profile, loading, error, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

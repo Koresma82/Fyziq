@@ -15,10 +15,10 @@ function fmt(ts) {
   return d.toLocaleDateString("pt-PT", { day: "2-digit", month: "long", year: "numeric" });
 }
 
-export default function AnalysisCard({ analysis, isAdmin, onDeleted }) {
+export default function AnalysisCard({ analysis, canDelete, onDeleted }) {
   const [open, setOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const { metrics, aiResult, userSnapshot, notes, imageUrl, imagePath } = analysis;
+  const { metrics, aiResult, patientSnapshot, notes, imageUrl, imagePath } = analysis;
 
   const handleDelete = async (e) => {
     e.stopPropagation();
@@ -73,12 +73,12 @@ export default function AnalysisCard({ analysis, isAdmin, onDeleted }) {
         }}>📊</div>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 14.5, fontWeight: 700, color: t.text }}>{fmt(analysis.date)}</div>
-          {userSnapshot?.weight && (
-            <div style={{ fontSize: 11.5, color: t.textSoft, marginTop: 1 }}>{userSnapshot.weight} kg</div>
+          {patientSnapshot?.weight && (
+            <div style={{ fontSize: 11.5, color: t.textSoft, marginTop: 1 }}>{patientSnapshot.weight} kg</div>
           )}
         </div>
         {metrics?.imc && pill(imcColor(metrics.imc), `IMC ${metrics.imc}`)}
-        {metrics?.bf && pill(bfColor(metrics.bf, userSnapshot?.sex || "M"), `${metrics.bf}%`)}
+        {metrics?.bf && pill(bfColor(metrics.bf, patientSnapshot?.sex || "M"), `${metrics.bf}%`)}
         <span style={{ fontSize: 13, color: t.textSoft, marginLeft: 2 }}>{open ? "▲" : "▼"}</span>
       </div>
 
@@ -95,7 +95,7 @@ export default function AnalysisCard({ analysis, isAdmin, onDeleted }) {
             <div style={{ padding: "0 15px 12px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9 }}>
               {[
                 { label: "IMC", val: metrics.imc, unit: "kg/m²", color: imcColor(metrics.imc) },
-                { label: "% Gordura", val: metrics.bf ?? "—", unit: "%", color: metrics.bf ? bfColor(metrics.bf, userSnapshot?.sex || "M") : t.textSoft },
+                { label: "% Gordura", val: metrics.bf ?? "—", unit: "%", color: metrics.bf ? bfColor(metrics.bf, patientSnapshot?.sex || "M") : t.textSoft },
                 { label: "Massa Gorda", val: metrics.fatMass ?? "—", unit: "kg", color: t.orange },
                 { label: "Massa Magra", val: metrics.leanMass ?? "—", unit: "kg", color: t.green },
                 { label: "BMR", val: metrics.bmr, unit: "kcal", color: t.blue },
@@ -151,7 +151,7 @@ export default function AnalysisCard({ analysis, isAdmin, onDeleted }) {
             </div>
           )}
 
-          {isAdmin && (
+          {canDelete && (
             <div style={{ padding: "0 15px 15px", display: "flex", justifyContent: "flex-end" }}>
               <button onClick={handleDelete} disabled={deleting} style={{
                 padding: "7px 16px", borderRadius: t.rSm,

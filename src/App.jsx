@@ -1,14 +1,13 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { theme } from "./config/theme";
-import LoginPage      from "./pages/LoginPage";
-import AdminDashboard from "./pages/AdminDashboard";
-import UserDetailPage from "./pages/UserDetailPage";
-import MyProfilePage  from "./pages/MyProfilePage";
-import NavBar         from "./components/NavBar";
+import LoginPage       from "./pages/LoginPage";
+import PatientsList    from "./pages/PatientsList";
+import PatientDetail   from "./pages/PatientDetail";
+import NavBar          from "./components/NavBar";
 
 function AppRoutes() {
-  const { user, isAdmin, loading } = useAuth();
+  const { user, loading } = useAuth();
 
   if (loading) return <SplashLoader />;
   if (!user)   return <LoginPage />;
@@ -17,18 +16,9 @@ function AppRoutes() {
     <div style={{ background: theme.bg, minHeight: "100vh", color: theme.text }}>
       <NavBar />
       <Routes>
-        {isAdmin ? (
-          <>
-            <Route path="/"          element={<AdminDashboard />} />
-            <Route path="/user/:uid" element={<UserDetailPage />} />
-            <Route path="*"          element={<Navigate to="/" />} />
-          </>
-        ) : (
-          <>
-            <Route path="/" element={<MyProfilePage />} />
-            <Route path="*" element={<Navigate to="/" />} />
-          </>
-        )}
+        <Route path="/"               element={<PatientsList />} />
+        <Route path="/patient/:pid"   element={<PatientDetail />} />
+        <Route path="*"               element={<Navigate to="/" />} />
       </Routes>
     </div>
   );
