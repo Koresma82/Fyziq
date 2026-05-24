@@ -1,0 +1,32 @@
+{
+  "name": "fyziq",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "netlify dev",
+    "dev:vite": "vite --mode dev",
+    "build": "vite build --mode prod",
+    "build:dev": "vite build --mode dev",
+    "build:test": "vite build --mode test",
+    "build:prod": "vite build --mode prod",
+    "preview": "vite preview",
+    "deploy:dev": "vite build --mode dev  && netlify deploy --dir=dist",
+    "deploy:test": "vite build --mode test && netlify deploy --dir=dist",
+    "deploy:prod": "vite build --mode prod && netlify deploy --dir=dist --prod",
+    "rules:dev": "firebase deploy --only firestore:rules,storage --project dev",
+    "rules:test": "firebase deploy --only firestore:rules,storage --project test",
+    "rules:prod": "firebase deploy --only firestore:rules,storage --project prod"
+  },
+  "dependencies": {
+    "firebase": "^10.14.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.30.3",
+    "recharts": "^2.15.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "netlify-cli": "^17.36.3",
+    "vite": "^5.4.21"
+  }
+}

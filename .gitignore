@@ -1,0 +1,20 @@
+node_modules/
+dist/
+.netlify/
+
+# Segredos / overrides locais — NUNCA commitar
+.env
+.env.local
+.env.dev.local
+.env.test.local
+.env.prod.local
+*-service-account.json
+
+# Os .env.dev / .env.test / .env.prod SÃO commitados:
+# contêm apenas config Firebase pública (apiKey é pública por design).
+# O ANTHROPIC_API_KEY fica vazio nesses ficheiros.
+
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

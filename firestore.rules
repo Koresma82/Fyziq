@@ -1,0 +1,43 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuth() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isSelf(uid) {
+      return isAuth() && request.auth.uid == uid;
+    }
+
+    // Users collection
+    match /users/{uid} {
+      allow read:   if isAuth() && (isSelf(uid) || isAdmin());
+      allow create: if isAuth() && isSelf(uid);
+      allow update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // Pending profiles (admin creates, anyone can read their own on login)
+    match /pendingProfiles/{docId} {
+      allow read:   if isAuth();
+      allow write:  if isAdmin();
+      allow delete: if isAuth(); // user deletes their own on first login
+    }
+
+    // Analyses
+    match /analyses/{analysisId} {
+      allow read:  if isAuth() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+  }
+}

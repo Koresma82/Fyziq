@@ -1,0 +1,56 @@
+# ══════════════════════════════════════════════════════════════
+#  Fyziq — netlify.toml
+#
+#  3 sites Netlify, ligados ao repo github.com/Koresma82/Fyziq
+#    branch dev  → site DEV  → Firebase fyziqdev
+#    branch test → site TEST → Firebase fyziqtest
+#    branch main → site PROD → Firebase fyziqprod
+#
+#  Cada site define no dashboard:
+#    - todas as VITE_FIREBASE_* (ou usa o .env.{mode} commitado)
+#    - VITE_APP_ENV  (dev | test | prod)
+#    - ANTHROPIC_API_KEY  ← segredo, só aqui
+# ══════════════════════════════════════════════════════════════
+
+[build]
+  command   = "npm run build:prod"
+  publish   = "dist"
+  functions = "netlify/functions"
+
+# Build por branch (CI/CD automático)
+[context."dev"]
+  command = "npm run build:dev"
+
+[context."test"]
+  command = "npm run build:test"
+
+[context.production]
+  command = "npm run build:prod"
+
+# Dev local
+[dev]
+  command    = "vite --mode dev"
+  port       = 8888
+  targetPort = 5173
+
+# SPA routing
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200
+
+# Security headers
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options            = "DENY"
+    X-Content-Type-Options     = "nosniff"
+    Referrer-Policy            = "strict-origin-when-cross-origin"
+    Permissions-Policy         = "camera=(self), microphone=()"
+    Content-Security-Policy    = "default-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebase.com https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.googletagmanager.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https://*.googleapis.com https://*.googleusercontent.com https://*.firebasestorage.app https://firebasestorage.googleapis.com; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.firebasestorage.app https://firebasestorage.googleapis.com https://*.google-analytics.com wss://*.firebaseio.com;"
+
+# Cache de assets
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
