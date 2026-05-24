@@ -117,12 +117,16 @@ export async function saveAnalysis(patientId, ownerId, analysisData) {
 }
 
 /** Histórico de análises de um paciente, mais recente primeiro */
-export async function getPatientAnalyses(patientId) {
+export async function getPatientAnalyses(patientId, ownerId) {
+  // A query filtra por ownerId (corresponde à Firestore rule).
+  // O filtro por patientId e a ordenação são feitos em memória,
+  // evitando assim a necessidade de um índice composto.
   const snap = await getDocs(
-    query(collection(db, "analyses"), where("patientId", "==", patientId))
+    query(collection(db, "analyses"), where("ownerId", "==", ownerId))
   );
   return snap.docs
     .map(d => ({ id: d.id, ...d.data() }))
+    .filter(a => a.patientId === patientId)
     .sort((a, b) => {
       const da = a.date?.toDate ? a.date.toDate() : new Date(a.date || 0);
       const db2 = b.date?.toDate ? b.date.toDate() : new Date(b.date || 0);

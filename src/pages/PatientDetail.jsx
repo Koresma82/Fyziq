@@ -31,7 +31,7 @@ export default function PatientDetail() {
 
   const load = async () => {
     setLoading(true);
-    const [p, a] = await Promise.all([getPatient(pid), getPatientAnalyses(pid)]);
+    const [p, a] = await Promise.all([getPatient(pid), getPatientAnalyses(pid, user.uid)]);
     setPatient(p);
     setEditData({ name: p?.name, email: p?.email, phone: p?.phone, sex: p?.sex,
                   age: p?.age, height: p?.height, weight: p?.weight, notes: p?.notes });

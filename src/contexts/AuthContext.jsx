@@ -1,5 +1,8 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
+import {
+  onAuthStateChanged, signInWithPopup, signInWithRedirect,
+  getRedirectResult, signOut,
+} from "firebase/auth";
 import { auth, googleProvider } from "../firebase";
 import { createOrGetProfessional } from "../services/firestoreService";
 
@@ -11,6 +14,9 @@ export function AuthProvider({ children }) {
   const [error, setError]     = useState(null);
 
   useEffect(() => {
+    // Apanha o resultado de um eventual signInWithRedirect.
+    getRedirectResult(auth).catch(() => {});
+
     const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
       if (!firebaseUser) {
         setUser(null); setProfile(null); return;
@@ -21,7 +27,7 @@ export function AuthProvider({ children }) {
         setProfile(prof);
       } catch (err) {
         console.error("Auth error:", err);
-        setError("Erro ao carregar perfil. Tenta novamente.");
+        setError("Erro ao carregar perfil. Verifica as Firestore Rules.");
         setUser(null);
       }
     });
@@ -31,10 +37,21 @@ export function AuthProvider({ children }) {
   const login = async () => {
     setError(null);
     try {
+      // Tenta popup primeiro (melhor UX no desktop).
       await signInWithPopup(auth, googleProvider);
     } catch (err) {
-      if (err.code !== "auth/popup-closed-by-user" &&
-          err.code !== "auth/cancelled-popup-request") {
+      // Popup bloqueado/fechado → cai para redirect (robusto em mobile).
+      if (err.code === "auth/popup-blocked" ||
+          err.code === "auth/cancelled-popup-request" ||
+          err.code === "auth/operation-not-supported-in-this-environment") {
+        try {
+          await signInWithRedirect(auth, googleProvider);
+          return;
+        } catch (e) {
+          console.error("Redirect login error:", e);
+        }
+      }
+      if (err.code !== "auth/popup-closed-by-user") {
         setError("Erro ao entrar com Google. Tenta novamente.");
       }
     }
