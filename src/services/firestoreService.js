@@ -1,6 +1,6 @@
 import {
   doc, getDoc, setDoc, updateDoc, deleteDoc,
-  collection, query, where, orderBy, getDocs,
+  collection, query, where, getDocs,
   addDoc, serverTimestamp,
 } from "firebase/firestore";
 import { db } from "../firebase";
@@ -81,10 +81,13 @@ async function isFirstUser() {
 
 /** Admin: list all active users */
 export async function listUsers() {
-  const snap = await getDocs(
-    query(collection(db, "users"), where("active", "==", true), orderBy("name"))
-  );
-  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  // Query simples (sem índice composto): vai buscar todos e
+  // filtra/ordena em memória. Volume pequeno, sem custo relevante.
+  const snap = await getDocs(collection(db, "users"));
+  return snap.docs
+    .map(d => ({ id: d.id, ...d.data() }))
+    .filter(u => u.active !== false)
+    .sort((a, b) => (a.name || "").localeCompare(b.name || "", "pt"));
 }
 
 /** Admin: list pending profiles (not yet logged in) */
@@ -135,14 +138,18 @@ export async function saveAnalysis(userId, analysisData) {
 
 /** Get all analyses for a user, newest first */
 export async function getUserAnalyses(userId) {
+  // where() simples num só campo NÃO precisa de índice composto.
+  // A ordenação por data é feita em memória.
   const snap = await getDocs(
-    query(
-      collection(db, "analyses"),
-      where("userId", "==", userId),
-      orderBy("date", "desc")
-    )
+    query(collection(db, "analyses"), where("userId", "==", userId))
   );
-  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  return snap.docs
+    .map(d => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => {
+      const da = a.date?.toDate ? a.date.toDate() : new Date(a.date || 0);
+      const db2 = b.date?.toDate ? b.date.toDate() : new Date(b.date || 0);
+      return db2 - da; // mais recente primeiro
+    });
 }
 
 /** Get a single analysis */
