@@ -6,35 +6,63 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isAdmin() {
-      return isAuth() &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
-    }
-
     function isSelf(uid) {
       return isAuth() && request.auth.uid == uid;
     }
 
-    // Users collection
+    // Lê o role do próprio user de forma segura.
+    // exists() evita erro quando o doc ainda não existe (primeiro login).
+    function myRole() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+        : 'none';
+    }
+
+    function isAdmin() {
+      return isAuth() && myRole() == 'admin';
+    }
+
+    // ── Users ────────────────────────────────────────────────
     match /users/{uid} {
-      allow read:   if isAuth() && (isSelf(uid) || isAdmin());
-      allow create: if isAuth() && isSelf(uid);
-      allow update: if isAdmin();
+      // Leitura do próprio doc, ou admin lê todos.
+      allow get:  if isAuth() && (isSelf(uid) || isAdmin());
+      // Listar a coleção: só admin (usado no dashboard).
+      // No primeiro login a app NÃO lista — só lê o próprio get().
+      allow list: if isAdmin();
+
+      // Criar o próprio doc no primeiro login.
+      allow create: if isSelf(uid);
+      // Update: o próprio (dados básicos) ou admin.
+      allow update: if isSelf(uid) || isAdmin();
       allow delete: if false;
     }
 
-    // Pending profiles (admin creates, anyone can read their own on login)
+    // ── Pending profiles ─────────────────────────────────────
+    // Convites criados pelo admin. No primeiro login, o user
+    // precisa de ler/apagar o seu próprio convite.
     match /pendingProfiles/{docId} {
       allow read:   if isAuth();
-      allow write:  if isAdmin();
-      allow delete: if isAuth(); // user deletes their own on first login
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAuth();
     }
 
-    // Analyses
+    // ── Meta ─────────────────────────────────────────────────
+    // Doc meta/bootstrap: legível por todos os autenticados
+    // (usado para detectar o primeiro login = primeiro admin).
+    // Só pode ser criado UMA vez, e nunca editado/apagado.
+    match /meta/{docId} {
+      allow read:   if isAuth();
+      allow create: if isAuth() && !exists(/databases/$(database)/documents/meta/$(docId));
+      allow update, delete: if false;
+    }
+
+    // ── Analyses ─────────────────────────────────────────────
     match /analyses/{analysisId} {
-      allow read:  if isAuth() && (
+      allow get:  if isAuth() && (
         resource.data.userId == request.auth.uid || isAdmin()
       );
+      allow list: if isAuth();
       allow create: if isAdmin();
       allow update: if isAdmin();
       allow delete: if isAdmin();

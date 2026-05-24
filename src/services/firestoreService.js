@@ -1,7 +1,7 @@
 import {
   doc, getDoc, setDoc, updateDoc, deleteDoc,
   collection, query, where, orderBy, getDocs,
-  addDoc, serverTimestamp, limit,
+  addDoc, serverTimestamp,
 } from "firebase/firestore";
 import { db } from "../firebase";
 
@@ -25,11 +25,16 @@ export async function getPendingProfile(email) {
 /** Called on first Google login — merges pending profile if exists */
 export async function createOrMergeUser(firebaseUser) {
   const { uid, email, displayName, photoURL } = firebaseUser;
+
+  // Já tem perfil? Devolve-o.
   const existing = await getUser(uid);
   if (existing) return existing;
 
+  // Convite pendente criado pelo admin (se houver).
   const pending = await getPendingProfile(email);
 
+  // Primeiro utilizador de todos → admin.
+  // Usa o doc meta/bootstrap (legível por todos) em vez de listar users.
   const isFirst = await isFirstUser();
   const role = isFirst ? "admin" : (pending?.role || "user");
 
@@ -47,19 +52,31 @@ export async function createOrMergeUser(firebaseUser) {
     createdBy: pending?.createdBy || uid,
   };
 
+  // Cria o doc do utilizador.
   await setDoc(doc(db, "users", uid), userData);
 
+  // Marca o bootstrap como concluído (primeiro admin criado).
+  if (isFirst) {
+    await setDoc(doc(db, "meta", "bootstrap"), {
+      initialized: true,
+      firstAdmin: uid,
+      at: serverTimestamp(),
+    });
+  }
+
+  // Remove o convite pendente, se existia.
   if (pending) {
     const key = email.toLowerCase().replace(/\./g, "_");
-    await deleteDoc(doc(db, "pendingProfiles", key));
+    try { await deleteDoc(doc(db, "pendingProfiles", key)); } catch (e) { /* noop */ }
   }
 
   return { id: uid, ...userData };
 }
 
+/** True se ainda não existe nenhum utilizador (bootstrap por fazer). */
 async function isFirstUser() {
-  const snap = await getDocs(query(collection(db, "users"), limit(1)));
-  return snap.empty;
+  const snap = await getDoc(doc(db, "meta", "bootstrap"));
+  return !snap.exists();
 }
 
 /** Admin: list all active users */
