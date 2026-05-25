@@ -4,6 +4,7 @@ import { theme, btn } from "../config/theme";
 const t = theme;
 
 // MediaPipe Pose — 33 landmarks. Ligações para desenhar o esqueleto.
+// Esqueleto completo (frente / costas) — 33 landmarks MediaPipe.
 const POSE_CONNECTIONS = [
   [11,12],[11,13],[13,15],[12,14],[14,16],          // braços + ombros
   [11,23],[12,24],[23,24],                          // tronco
@@ -12,10 +13,29 @@ const POSE_CONNECTIONS = [
   [0,11],[0,12],                                    // cabeça → ombros
 ];
 
+// Esqueleto lateral (perfil) — só uma cadeia: cabeça→ombro→anca→joelho→tornozelo.
+// Usa os pontos do lado mais visível; desenhamos ambos os lados ténues
+// e a cadeia sagital a cheio.
+const PROFILE_CONNECTIONS_LEFT = [
+  [0,11],[11,13],[13,15],   // cabeça, ombro, cotovelo, pulso
+  [11,23],[23,25],[25,27],[27,31],  // ombro→anca→joelho→tornozelo→pé
+];
+const PROFILE_CONNECTIONS_RIGHT = [
+  [0,12],[12,14],[14,16],
+  [12,24],[24,26],[26,28],[28,32],
+];
+
+// Devolve as ligações certas para o ângulo a capturar.
+function connectionsForAngle(angle) {
+  if (angle === "left")  return PROFILE_CONNECTIONS_LEFT;
+  if (angle === "right") return PROFILE_CONNECTIONS_RIGHT;
+  return POSE_CONNECTIONS; // front / back / default
+}
+
 // Índices essenciais para verificar enquadramento de corpo inteiro
 const KEY_POINTS = { nose: 0, lShoulder: 11, rShoulder: 12, lAnkle: 27, rAnkle: 28 };
 
-export default function CameraCapture({ onCapture, onCancel }) {
+export default function CameraCapture({ onCapture, onCancel, angle = "front" }) {
   const videoRef  = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
@@ -26,22 +46,31 @@ export default function CameraCapture({ onCapture, onCancel }) {
   const [errorMsg, setErrorMsg] = useState("");
   const [framing, setFraming] = useState({ ok: false, msg: "Posiciona-te de corpo inteiro" });
   const latestLandmarks = useRef(null);
+  const smoothedRef = useRef(null);  // esqueleto suavizado (anti-tremor)
+  const missRef = useRef(0);         // frames seguidos sem deteção
 
   // ── Avalia se a pessoa está bem enquadrada ──────────────────
   const evaluateFraming = useCallback((lm) => {
     if (!lm || lm.length < 33) {
       return { ok: false, msg: "Nenhuma pessoa detectada" };
     }
-    const visible = (i) => lm[i] && (lm[i].visibility ?? 1) > 0.5;
+    const isProfile = angle === "left" || angle === "right";
+    const thr = isProfile ? 0.2 : 0.5;
+    const visible = (i) => lm[i] && (lm[i].visibility ?? 1) > thr;
+
     const head  = visible(KEY_POINTS.nose);
     const feet  = visible(KEY_POINTS.lAnkle) || visible(KEY_POINTS.rAnkle);
-    const shoulders = visible(KEY_POINTS.lShoulder) && visible(KEY_POINTS.rShoulder);
+    // No perfil basta UM ombro (o outro fica tapado pelo corpo).
+    const shoulders = isProfile
+      ? (visible(KEY_POINTS.lShoulder) || visible(KEY_POINTS.rShoulder))
+      : (visible(KEY_POINTS.lShoulder) && visible(KEY_POINTS.rShoulder));
 
     if (!head)      return { ok: false, msg: "Afasta-te — a cabeça não aparece" };
     if (!feet)      return { ok: false, msg: "Afasta-te — os pés não aparecem" };
-    if (!shoulders) return { ok: false, msg: "Vira-te de frente para a câmara" };
+    if (!shoulders) return { ok: false, msg: isProfile
+      ? "Posiciona-te de lado para a câmara"
+      : "Vira-te de frente para a câmara" };
 
-    // Corpo deve ocupar a maior parte vertical do enquadramento
     const top = lm[KEY_POINTS.nose].y;
     const bottom = Math.max(
       lm[KEY_POINTS.lAnkle]?.y ?? 0, lm[KEY_POINTS.rAnkle]?.y ?? 0
@@ -51,12 +80,16 @@ export default function CameraCapture({ onCapture, onCancel }) {
     if (coverage > 0.97) return { ok: false, msg: "Afasta-te um pouco" };
 
     // Centragem horizontal
-    const cx = (lm[KEY_POINTS.lShoulder].x + lm[KEY_POINTS.rShoulder].x) / 2;
-    if (cx < 0.30) return { ok: false, msg: "Move-te para a direita" };
-    if (cx > 0.70) return { ok: false, msg: "Move-te para a esquerda" };
+    const sx = [lm[KEY_POINTS.lShoulder], lm[KEY_POINTS.rShoulder]]
+      .filter(p => p && (p.visibility ?? 1) > thr);
+    if (sx.length) {
+      const cx = sx.reduce((s, p) => s + p.x, 0) / sx.length;
+      if (cx < 0.28) return { ok: false, msg: "Move-te para a direita" };
+      if (cx > 0.72) return { ok: false, msg: "Move-te para a esquerda" };
+    }
 
     return { ok: true, msg: "Enquadramento perfeito! Podes capturar" };
-  }, []);
+  }, [angle]);
 
   // ── Desenha o esqueleto sobre o vídeo ───────────────────────
   const drawSkeleton = useCallback((lm) => {
@@ -75,14 +108,24 @@ export default function CameraCapture({ onCapture, onCancel }) {
     const ok = framing.ok;
     const color = ok ? "#3ad6bf" : "#f59e0b";
 
-    // Ligações
+    // Ligações conforme o ângulo (frente/costas = completo; perfil = cadeia sagital)
+    const connections = connectionsForAngle(angle);
+    const isProfile = angle === "left" || angle === "right";
+
+    // Pontos visíveis usados nas ligações (para perfil, só desenhar esses)
+    const usedPoints = new Set();
+    connections.forEach(([a, b]) => { usedPoints.add(a); usedPoints.add(b); });
+
     ctx.strokeStyle = color;
     ctx.lineWidth = 4;
     ctx.shadowColor = color;
     ctx.shadowBlur = 8;
-    POSE_CONNECTIONS.forEach(([a, b]) => {
+    connections.forEach(([a, b]) => {
       const pa = lm[a], pb = lm[b];
-      if (pa && pb && (pa.visibility ?? 1) > 0.4 && (pb.visibility ?? 1) > 0.4) {
+      // No perfil, baixamos o limiar de visibilidade — o lado oposto
+      // do corpo tem visibility baixa mas a cadeia visível mantém-se.
+      const thr = isProfile ? 0.2 : 0.4;
+      if (pa && pb && (pa.visibility ?? 1) > thr && (pb.visibility ?? 1) > thr) {
         ctx.beginPath();
         ctx.moveTo(pa.x * W, pa.y * H);
         ctx.lineTo(pb.x * W, pb.y * H);
@@ -92,8 +135,11 @@ export default function CameraCapture({ onCapture, onCancel }) {
 
     // Pontos
     ctx.shadowBlur = 10;
-    lm.forEach((p) => {
-      if ((p.visibility ?? 1) > 0.4) {
+    lm.forEach((p, i) => {
+      // No perfil só desenha os pontos da cadeia sagital
+      if (isProfile && !usedPoints.has(i)) return;
+      const thr = isProfile ? 0.2 : 0.4;
+      if ((p.visibility ?? 1) > thr) {
         ctx.beginPath();
         ctx.arc(p.x * W, p.y * H, 5, 0, Math.PI * 2);
         ctx.fillStyle = color;
@@ -105,7 +151,7 @@ export default function CameraCapture({ onCapture, onCancel }) {
         ctx.shadowBlur = 10;
       }
     });
-  }, [framing.ok]);
+  }, [framing.ok, angle]);
 
   // ── Inicializa MediaPipe + câmara ───────────────────────────
   useEffect(() => {
@@ -216,10 +262,41 @@ export default function CameraCapture({ onCapture, onCancel }) {
 
       if (video.readyState >= 2) {
         const result = pose.detectForVideo(video, performance.now());
-        const lm = result?.landmarks?.[0] || null;
-        latestLandmarks.current = lm;
-        setFraming(evaluateFraming(lm));
-        drawSkeleton(lm);
+        const raw = result?.landmarks?.[0] || null;
+
+        if (raw && raw.length >= 33) {
+          // Suavização: média ponderada com o frame anterior
+          // (reduz o "tremor" / piscar dos pontos).
+          const prev = smoothedRef.current;
+          let smoothed;
+          if (prev && prev.length === raw.length) {
+            const ALPHA = 0.5; // 0 = sem movimento, 1 = sem suavização
+            smoothed = raw.map((p, i) => ({
+              x: prev[i].x + (p.x - prev[i].x) * ALPHA,
+              y: prev[i].y + (p.y - prev[i].y) * ALPHA,
+              z: p.z,
+              visibility: p.visibility,
+            }));
+          } else {
+            smoothed = raw;
+          }
+          smoothedRef.current = smoothed;
+          latestLandmarks.current = smoothed;
+          missRef.current = 0;
+          setFraming(evaluateFraming(smoothed));
+          drawSkeleton(smoothed);
+        } else {
+          // Deteção falhou neste frame: mantém o último esqueleto
+          // visível por alguns frames em vez de o apagar (anti-piscar).
+          missRef.current += 1;
+          if (missRef.current < 12 && smoothedRef.current) {
+            drawSkeleton(smoothedRef.current);
+          } else {
+            smoothedRef.current = null;
+            setFraming(evaluateFraming(null));
+            drawSkeleton(null);
+          }
+        }
       }
       rafRef.current = requestAnimationFrame(renderLoop);
     }
@@ -304,7 +381,8 @@ export default function CameraCapture({ onCapture, onCancel }) {
       {/* Top bar */}
       <div style={S.topBar}>
         <span style={{ color: "#fff", fontWeight: 700, fontSize: 15 }}>
-          📷 Câmara ao vivo
+          📷 {{ front: "Foto de Frente", back: "Foto de Costas",
+                left: "Perfil Esquerdo", right: "Perfil Direito" }[angle] || "Câmara ao vivo"}
         </span>
         <button onClick={onCancel} style={{
           background: "rgba(255,255,255,0.18)", border: "none",

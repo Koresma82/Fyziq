@@ -79,6 +79,7 @@ export default function MultiAngleCapture({ onConfirm, onCancel }) {
   if (cameraFor) {
     return (
       <CameraCapture
+        angle={cameraFor}
         onCapture={handleCameraCapture}
         onCancel={() => setCameraFor(null)}
       />
