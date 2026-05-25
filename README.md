@@ -121,3 +121,49 @@ public/{favicon.svg,icon-*.png,logo-full.png,manifest.webmanifest}
 .firebaserc                    ← aliases dev/test/prod
 firebase.json
 ```
+
+---
+
+## Super Admin
+
+A app tem um painel de Super Admin separado das contas de profissional.
+
+### Criar conta de super admin
+
+1. No Firebase Console do ambiente pretendido → **Authentication → Sign-in method**
+   → ativar **Email/Password**.
+2. **Project Settings → Service Accounts → Generate new private key** → guardar o JSON.
+3. Instalar a dependência e correr o script:
+
+```bash
+npm install firebase-admin
+node scripts/create-super-admin.js <service-account.json> <email> <password>
+```
+
+Exemplo:
+```bash
+node scripts/create-super-admin.js ./fyziqtest-sa.json admin@fyziq.app MinhaPass123
+```
+
+### Aceder ao painel
+
+Na página de login, toca **5 vezes no logo** → aparece o ecrã de login
+super admin → entra com o email/password criados.
+
+### O que o super admin controla
+
+- Lista de todos os profissionais com métricas (pacientes, análises IA, custo estimado)
+- Alterar plano de cada conta: Trial / Standard / Premium
+- Definir os dias de trial
+- Ativar / desativar contas
+
+### Planos e limites
+
+| Plano    | Pacientes | Análises IA/mês |
+|----------|-----------|-----------------|
+| Trial    | 5         | 10              |
+| Standard | 20        | 30              |
+| Premium  | ∞         | ∞               |
+
+Quando o trial expira, a conta passa a comportar-se como Standard
+(os dados existentes mantêm-se visíveis, só bloqueia criar acima do limite).

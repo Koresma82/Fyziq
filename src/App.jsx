@@ -5,12 +5,14 @@ import LoginPage       from "./pages/LoginPage";
 import PatientsList    from "./pages/PatientsList";
 import PatientDetail   from "./pages/PatientDetail";
 import NavBar          from "./components/NavBar";
+import SuperAdminDashboard from "./pages/SuperAdminDashboard";
 
 function AppRoutes() {
-  const { user, loading } = useAuth();
+  const { user, superAdmin, loading } = useAuth();
 
   if (loading) return <SplashLoader />;
   if (!user)   return <LoginPage />;
+  if (superAdmin) return <SuperAdminDashboard />;
 
   return (
     <div style={{ background: theme.bg, minHeight: "100vh", color: theme.text }}>

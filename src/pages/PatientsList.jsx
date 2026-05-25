@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { theme, btn } from "../config/theme";
 import { listPatients, createPatient } from "../services/firestoreService";
+import { canCreatePatient, getPlan, effectivePlan, trialDaysLeft } from "../config/plans";
 
 const t = theme;
 const avatarColors = ["#8b5cf6","#3b82f6","#10b981","#f59e0b","#ef4444","#ec4899"];
@@ -14,7 +15,7 @@ function initForm() {
 }
 
 export default function PatientsList() {
-  const { user } = useAuth();
+  const { user, profile, planConfig } = useAuth();
   const navigate = useNavigate();
 
   const [patients, setPatients] = useState([]);
@@ -23,6 +24,7 @@ export default function PatientsList() {
   const [form,     setForm]     = useState(initForm());
   const [saving,   setSaving]   = useState(false);
   const [search,   setSearch]   = useState("");
+  const [limitMsg, setLimitMsg] = useState("");
 
   const load = async () => {
     if (!user?.uid) return;
@@ -31,11 +33,21 @@ export default function PatientsList() {
     setPatients(p);
     setLoading(false);
   };
-  // Recarrega assim que o user.uid estiver disponível.
   useEffect(() => { load(); }, [user?.uid]);
+
+  // Verifica limite antes de abrir o formulário
+  const openForm = () => {
+    const check = canCreatePatient(profile, patients.length, planConfig);
+    if (!check.allowed) { setLimitMsg(check.reason); return; }
+    setLimitMsg("");
+    setShowForm(true);
+  };
 
   const handleCreate = async () => {
     if (!form.name.trim()) return;
+    // Revalida no momento de gravar
+    const check = canCreatePatient(profile, patients.length, planConfig);
+    if (!check.allowed) { setLimitMsg(check.reason); setShowForm(false); return; }
     setSaving(true);
     try {
       const id = await createPatient(user.uid, form);
@@ -72,8 +84,46 @@ export default function PatientsList() {
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
         <h1 style={{ fontSize: 24, fontWeight: 800, color: t.navy, letterSpacing: -0.5 }}>Pacientes</h1>
-        <button style={btn(t, "primary")} onClick={() => setShowForm(true)}>+ Novo Paciente</button>
+        <button style={btn(t, "primary")} onClick={openForm}>+ Novo Paciente</button>
       </div>
+
+      {/* Banner do plano */}
+      {profile && (() => {
+        const eff = effectivePlan(profile);
+        const plan = getPlan(eff, planConfig);
+        const days = trialDaysLeft(profile);
+        const limit = plan.maxPatients === -1 ? "∞" : plan.maxPatients;
+        return (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 10,
+            background: `${plan.color}10`, border: `1px solid ${plan.color}33`,
+            borderRadius: t.rMd, padding: "10px 14px", marginBottom: 14,
+          }}>
+            <span style={{
+              fontSize: 11, fontWeight: 800, color: plan.color,
+              background: `${plan.color}1e`, padding: "3px 9px", borderRadius: 7,
+            }}>{plan.label.toUpperCase()}</span>
+            <span style={{ fontSize: 12.5, color: t.textMid, fontWeight: 600, flex: 1 }}>
+              {patients.length}/{limit} pacientes
+              {profile.plan === "trial" && days != null && (
+                days > 0 ? ` · ${days} dia${days !== 1 ? "s" : ""} de trial`
+                         : " · trial expirado"
+              )}
+            </span>
+          </div>
+        );
+      })()}
+
+      {/* Mensagem de limite atingido */}
+      {limitMsg && (
+        <div style={{
+          background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)",
+          borderRadius: t.rMd, padding: "11px 14px", marginBottom: 14,
+          fontSize: 13, color: "#92600a", display: "flex", gap: 8,
+        }}>
+          <span>🔒</span><span>{limitMsg}</span>
+        </div>
+      )}
 
       {/* Stat */}
       <div style={{

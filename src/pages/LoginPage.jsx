@@ -1,9 +1,26 @@
+import { useState, useRef } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import SuperAdminLogin from "../components/SuperAdminLogin";
 import { theme, btn } from "../config/theme";
 
 export default function LoginPage() {
   const { login, error } = useAuth();
   const t = theme;
+
+  // 5 toques no logo → acesso super admin
+  const [showSuperAdmin, setShowSuperAdmin] = useState(false);
+  const tapsRef = useRef({ count: 0, timer: null });
+  const handleLogoTap = () => {
+    const s = tapsRef.current;
+    s.count += 1;
+    clearTimeout(s.timer);
+    if (s.count >= 5) {
+      s.count = 0;
+      setShowSuperAdmin(true);
+    } else {
+      s.timer = setTimeout(() => { s.count = 0; }, 1200);
+    }
+  };
 
   return (
     <div style={{
@@ -24,7 +41,8 @@ export default function LoginPage() {
         textAlign: "center",
       }}>
         <img src="/logo-full.png" alt="Fyziq"
-          style={{ width: 200, height: "auto", margin: "0 auto 8px", display: "block" }} />
+          onClick={handleLogoTap}
+          style={{ width: 200, height: "auto", margin: "0 auto 8px", display: "block", cursor: "pointer", userSelect: "none" }} />
 
         <p style={{ fontSize: 14, color: t.textMid, lineHeight: 1.6, margin: "16px 0 32px" }}>
           Análise de composição corporal e postura com Inteligência Artificial.
@@ -72,6 +90,10 @@ export default function LoginPage() {
           Apenas utilizadores autorizados têm acesso.
         </p>
       </div>
+
+      {showSuperAdmin && (
+        <SuperAdminLogin onClose={() => setShowSuperAdmin(false)} />
+      )}
     </div>
   );
 }

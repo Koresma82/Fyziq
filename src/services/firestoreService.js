@@ -1,9 +1,10 @@
 import {
   doc, getDoc, setDoc, updateDoc, deleteDoc,
   collection, query, where, getDocs,
-  addDoc, serverTimestamp,
+  addDoc, serverTimestamp, increment,
 } from "firebase/firestore";
 import { db } from "../firebase";
+import { currentMonthKey } from "../config/plans";
 
 // ════════════════════════════════════════════════════════════
 //  PROFISSIONAIS (contas Google que fazem login)
@@ -22,32 +23,27 @@ export async function createOrGetProfessional(firebaseUser) {
   const existing = await getProfessional(uid);
   if (existing) return existing;
 
-  // Primeiro profissional de todos → admin (via doc meta/bootstrap)
-  const isFirst = await isFirstProfessional();
+  // Trial de 7 dias a contar de agora.
+  const trialEnds = new Date();
+  trialEnds.setDate(trialEnds.getDate() + 7);
 
   const data = {
     email,
     name:      displayName || email,
     photoURL:  photoURL || "",
-    role:      isFirst ? "admin" : "professional",
+    role:      "professional",
+    plan:      "trial",
+    trialEndsAt: trialEnds,
     active:    true,
     createdAt: serverTimestamp(),
+    // Contadores de utilização (para limites e métricas)
+    patientCount: 0,
+    analysisCount: 0,        // total acumulado
+    aiUsage: {},             // { "2026-05": 7, "2026-06": 3, ... }
   };
 
   await setDoc(doc(db, "professionals", uid), data);
-
-  if (isFirst) {
-    await setDoc(doc(db, "meta", "bootstrap"), {
-      initialized: true, firstAdmin: uid, at: serverTimestamp(),
-    });
-  }
-
   return { id: uid, ...data };
-}
-
-async function isFirstProfessional() {
-  const snap = await getDoc(doc(db, "meta", "bootstrap"));
-  return !snap.exists();
 }
 
 // ════════════════════════════════════════════════════════════
@@ -71,7 +67,7 @@ export async function getPatient(patientId) {
   return snap.exists() ? { id: snap.id, ...snap.data() } : null;
 }
 
-/** Cria uma ficha de paciente */
+/** Cria uma ficha de paciente e incrementa o contador do profissional */
 export async function createPatient(ownerId, { name, email, phone, sex, age, height, weight, notes }) {
   const ref = await addDoc(collection(db, "patients"), {
     ownerId,
@@ -86,6 +82,10 @@ export async function createPatient(ownerId, { name, email, phone, sex, age, hei
     active: true,
     createdAt: serverTimestamp(),
   });
+  // Incrementa contador de pacientes do profissional
+  await updateDoc(doc(db, "professionals", ownerId), {
+    patientCount: increment(1),
+  });
   return ref.id;
 }
 
@@ -96,16 +96,21 @@ export async function updatePatient(patientId, data) {
   });
 }
 
-/** Remove (soft delete) um paciente */
-export async function deletePatient(patientId) {
+/** Remove (soft delete) um paciente e decrementa o contador */
+export async function deletePatient(patientId, ownerId) {
   await updateDoc(doc(db, "patients", patientId), { active: false });
+  if (ownerId) {
+    await updateDoc(doc(db, "professionals", ownerId), {
+      patientCount: increment(-1),
+    });
+  }
 }
 
 // ════════════════════════════════════════════════════════════
 //  ANÁLISES (ligadas a um paciente)
 // ════════════════════════════════════════════════════════════
 
-/** Guarda uma análise para um paciente */
+/** Guarda uma análise e regista o uso de IA do profissional */
 export async function saveAnalysis(patientId, ownerId, analysisData) {
   const ref = await addDoc(collection(db, "analyses"), {
     ...analysisData,
@@ -113,14 +118,17 @@ export async function saveAnalysis(patientId, ownerId, analysisData) {
     ownerId,
     date: serverTimestamp(),
   });
+  // Regista uso de IA: total + contador do mês corrente
+  const monthKey = currentMonthKey();
+  await updateDoc(doc(db, "professionals", ownerId), {
+    analysisCount: increment(1),
+    [`aiUsage.${monthKey}`]: increment(1),
+  });
   return ref.id;
 }
 
 /** Histórico de análises de um paciente, mais recente primeiro */
 export async function getPatientAnalyses(patientId, ownerId) {
-  // A query filtra por ownerId (corresponde à Firestore rule).
-  // O filtro por patientId e a ordenação são feitos em memória,
-  // evitando assim a necessidade de um índice composto.
   const snap = await getDocs(
     query(collection(db, "analyses"), where("ownerId", "==", ownerId))
   );
@@ -137,4 +145,66 @@ export async function getPatientAnalyses(patientId, ownerId) {
 /** Elimina uma análise */
 export async function deleteAnalysis(analysisId) {
   await deleteDoc(doc(db, "analyses", analysisId));
+}
+
+// ════════════════════════════════════════════════════════════
+//  SUPER ADMIN
+// ════════════════════════════════════════════════════════════
+
+/** Verifica se um UID é super admin */
+export async function isSuperAdmin(uid) {
+  if (!uid) return false;
+  const snap = await getDoc(doc(db, "superAdmins", uid));
+  return snap.exists();
+}
+
+/** Lista todos os profissionais (só super admin) */
+export async function listAllProfessionals() {
+  const snap = await getDocs(collection(db, "professionals"));
+  return snap.docs
+    .map(d => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => {
+      const da = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(0);
+      const db2 = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(0);
+      return db2 - da;
+    });
+}
+
+/** Super admin: altera o plano de um profissional */
+export async function setProfessionalPlan(uid, plan, trialDays = 7) {
+  const update = { plan };
+  if (plan === "trial") {
+    const ends = new Date();
+    ends.setDate(ends.getDate() + trialDays);
+    update.trialEndsAt = ends;
+  } else {
+    update.trialEndsAt = null;
+  }
+  await updateDoc(doc(db, "professionals", uid), update);
+}
+
+/** Super admin: ativa/desativa uma conta */
+export async function setProfessionalActive(uid, active) {
+  await updateDoc(doc(db, "professionals", uid), { active });
+}
+
+// ════════════════════════════════════════════════════════════
+//  CONFIG DE PLANOS (editável pelo super admin)
+// ════════════════════════════════════════════════════════════
+
+/**
+ * Lê os overrides de limites definidos pelo super admin.
+ * Devolve null se nunca foram configurados (usa-se os defaults).
+ */
+export async function getPlanConfig() {
+  const snap = await getDoc(doc(db, "config", "plans"));
+  return snap.exists() ? snap.data() : null;
+}
+
+/** Super admin: grava os overrides de limites */
+export async function savePlanConfig(overrides) {
+  await setDoc(doc(db, "config", "plans"), {
+    ...overrides,
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
 }

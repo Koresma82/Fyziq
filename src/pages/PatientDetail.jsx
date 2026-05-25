@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { theme, btn } from "../config/theme";
+import { canRunAnalysis, getPlan, effectivePlan, currentMonthKey } from "../config/plans";
 import {
   getPatient, getPatientAnalyses, saveAnalysis,
   updatePatient, deletePatient,
@@ -18,13 +19,14 @@ const initials = (n) => n ? n.split(" ").map(w => w[0]).join("").slice(0,2).toUp
 
 export default function PatientDetail() {
   const { pid } = useParams();
-  const { user } = useAuth();
+  const { user, profile, planConfig, refreshProfile } = useAuth();
   const navigate = useNavigate();
 
   const [patient,    setPatient]    = useState(null);
   const [analyses,   setAnalyses]   = useState([]);
   const [loading,    setLoading]    = useState(true);
   const [showForm,   setShowForm]   = useState(false);
+  const [limitMsg,   setLimitMsg]   = useState("");
   const [editMode,   setEditMode]   = useState(false);
   const [editData,   setEditData]   = useState({});
   const [savingEdit, setSavingEdit] = useState(false);
@@ -55,6 +57,7 @@ export default function PatientDetail() {
     });
     setShowForm(false);
     await load();
+    await refreshProfile();
   };
 
   const handleSaveEdit = async () => {
@@ -71,7 +74,7 @@ export default function PatientDetail() {
 
   const handleDeletePatient = async () => {
     if (!confirm(`Eliminar o paciente ${patient.name}? As análises ficam guardadas mas o paciente deixa de aparecer.`)) return;
-    await deletePatient(pid);
+    await deletePatient(pid, user.uid);
     navigate("/");
   };
 
@@ -215,8 +218,25 @@ export default function PatientDetail() {
       {/* History */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
         <div style={S.sHdr}>Histórico · {analyses.length} análise{analyses.length !== 1 ? "s" : ""}</div>
-        <button style={btn(t, "primary")} onClick={() => setShowForm(true)}>+ Nova Análise</button>
+        <button style={btn(t, "primary")} onClick={() => {
+          const usage = profile?.aiUsage?.[currentMonthKey()] || 0;
+          const check = canRunAnalysis(profile, usage, planConfig);
+          if (!check.allowed) { setLimitMsg(check.reason); return; }
+          setLimitMsg("");
+          setShowForm(true);
+        }}>+ Nova Análise</button>
       </div>
+
+      {/* Mensagem de limite IA */}
+      {limitMsg && (
+        <div style={{
+          background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)",
+          borderRadius: t.rMd, padding: "11px 14px", marginBottom: 14,
+          fontSize: 13, color: "#92600a", display: "flex", gap: 8,
+        }}>
+          <span>🔒</span><span>{limitMsg}</span>
+        </div>
+      )}
 
       {analyses.length === 0 ? (
         <div style={{ textAlign: "center", padding: "50px 20px", color: t.textSoft }}>

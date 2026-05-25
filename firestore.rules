@@ -6,37 +6,59 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // ── Meta ─────────────────────────────────────────────────
-    // meta/bootstrap: detecta o primeiro profissional (= admin).
-    match /meta/{docId} {
-      allow read:   if isAuth();
-      allow create: if isAuth() && !exists(/databases/$(database)/documents/meta/$(docId));
-      allow update, delete: if false;
+    function isSuperAdmin() {
+      return isAuth()
+        && exists(/databases/$(database)/documents/superAdmins/$(request.auth.uid));
     }
 
-    // ── Professionals (contas que fazem login) ───────────────
+    // Campos que um profissional NÃO pode alterar em si próprio
+    // (plano, trial, contadores) — só o super admin os muda.
+    function planFieldsUnchanged() {
+      let protectedKeys = ['plan', 'trialEndsAt', 'role'];
+      return !request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny(protectedKeys);
+    }
+
+    // ── Super Admins ─────────────────────────────────────────
+    match /superAdmins/{uid} {
+      allow read:  if isAuth();           // a app verifica o próprio estatuto
+      allow write: if false;              // criado só via script (Admin SDK)
+    }
+
+    // ── Config (limites de planos, editável pelo super admin) ─
+    match /config/{docId} {
+      allow read:  if isAuth();          // a app lê os limites efectivos
+      allow write: if isSuperAdmin();    // só o super admin edita
+    }
+
+    // ── Professionals ────────────────────────────────────────
     match /professionals/{uid} {
-      // Cada profissional lê/edita só o seu próprio perfil.
-      allow get:    if isAuth() && request.auth.uid == uid;
+      allow get:    if isAuth() && (request.auth.uid == uid || isSuperAdmin());
+      allow list:   if isSuperAdmin();
       allow create: if isAuth() && request.auth.uid == uid;
-      allow update: if isAuth() && request.auth.uid == uid;
+      // O próprio pode atualizar dados, mas não plano/role/trial.
+      // O super admin pode atualizar tudo.
+      allow update: if isSuperAdmin()
+                    || (isAuth() && request.auth.uid == uid && planFieldsUnchanged());
       allow delete: if false;
     }
 
-    // ── Patients (fichas — não fazem login) ──────────────────
-    // Cada paciente pertence ao profissional que o criou (ownerId).
+    // ── Patients ─────────────────────────────────────────────
     match /patients/{patientId} {
-      allow get, list: if isAuth() && resource.data.ownerId == request.auth.uid;
+      allow get, list: if isAuth() &&
+        (resource.data.ownerId == request.auth.uid || isSuperAdmin());
       allow create:     if isAuth() && request.resource.data.ownerId == request.auth.uid;
-      allow update, delete: if isAuth() && resource.data.ownerId == request.auth.uid;
+      allow update, delete: if isAuth() &&
+        (resource.data.ownerId == request.auth.uid || isSuperAdmin());
     }
 
     // ── Analyses ─────────────────────────────────────────────
-    // Cada análise pertence ao profissional (ownerId) e a um paciente.
     match /analyses/{analysisId} {
-      allow get, list: if isAuth() && resource.data.ownerId == request.auth.uid;
+      allow get, list: if isAuth() &&
+        (resource.data.ownerId == request.auth.uid || isSuperAdmin());
       allow create:     if isAuth() && request.resource.data.ownerId == request.auth.uid;
-      allow update, delete: if isAuth() && resource.data.ownerId == request.auth.uid;
+      allow update, delete: if isAuth() &&
+        (resource.data.ownerId == request.auth.uid || isSuperAdmin());
     }
   }
 }
