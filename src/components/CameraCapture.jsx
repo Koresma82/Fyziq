@@ -111,7 +111,26 @@ export default function CameraCapture({ onCapture, onCancel }) {
   useEffect(() => {
     let cancelled = false;
 
+    // Deteta browsers embutidos (WhatsApp, Instagram, Facebook...)
+    // que NÃO conseguem aceder à câmara.
+    function detectInAppBrowser() {
+      const ua = navigator.userAgent || "";
+      if (/FBAN|FBAV|FB_IAB|Instagram/i.test(ua)) return "Instagram/Facebook";
+      if (/WhatsApp/i.test(ua)) return "WhatsApp";
+      if (/Line\//i.test(ua)) return "LINE";
+      if (/MicroMessenger/i.test(ua)) return "WeChat";
+      return null;
+    }
+
     async function init() {
+      // Bloqueia logo se for in-app browser
+      const inApp = detectInAppBrowser();
+      if (inApp) {
+        setStatus("inapp");
+        setErrorMsg(inApp);
+        return;
+      }
+
       try {
         // Carrega MediaPipe Tasks Vision via CDN dinâmico
         const vision = await import(
@@ -135,20 +154,37 @@ export default function CameraCapture({ onCapture, onCancel }) {
         if (cancelled) return;
         poseRef.current = poseLandmarker;
 
-        // Abre a câmara (preferência: câmara traseira, retrato)
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: "environment",
-            width:  { ideal: 1080 },
-            height: { ideal: 1920 },
-          },
-          audio: false,
-        });
+        // Verifica suporte antes de tentar
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw Object.assign(new Error("no-support"), { name: "NotSupportedError" });
+        }
+
+        // Abre a câmara com fallback progressivo:
+        // alguns Android rejeitam constraints específicos.
+        const attempts = [
+          { video: { facingMode: { ideal: "environment" } }, audio: false },
+          { video: { facingMode: "environment" }, audio: false },
+          { video: true, audio: false },   // último recurso: qualquer câmara
+        ];
+        let stream = null;
+        let lastErr = null;
+        for (const constraints of attempts) {
+          try {
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+            break;
+          } catch (e) {
+            lastErr = e;
+            // Erros de permissão não adianta repetir
+            if (e.name === "NotAllowedError" || e.name === "PermissionDeniedError") break;
+          }
+        }
+        if (!stream) throw lastErr || new Error("camera-failed");
         if (cancelled) { stream.getTracks().forEach(tr => tr.stop()); return; }
 
         streamRef.current = stream;
         const video = videoRef.current;
         video.srcObject = stream;
+        video.setAttribute("playsinline", "true"); // essencial iOS/Android
         await video.play();
 
         setStatus("ready");
@@ -163,7 +199,11 @@ export default function CameraCapture({ onCapture, onCancel }) {
           setErrorMsg(
             err.name === "NotFoundError"
               ? "Nenhuma câmara encontrada neste dispositivo."
-              : "Não foi possível iniciar a câmara ao vivo."
+              : err.name === "NotSupportedError"
+              ? "Este navegador não suporta câmara ao vivo. Usa o upload de ficheiro ou abre noutro navegador (Chrome)."
+              : err.name === "NotReadableError"
+              ? "A câmara está a ser usada por outra aplicação. Fecha-a e tenta de novo."
+              : "Não foi possível iniciar a câmara ao vivo. Usa o upload de ficheiro."
           );
         }
       }
@@ -297,6 +337,27 @@ export default function CameraCapture({ onCapture, onCancel }) {
           <div style={{ fontSize: 14, color: "rgba(255,255,255,0.6)", lineHeight: 1.5 }}>
             Para usar a câmara ao vivo, autoriza o acesso nas definições do
             navegador e tenta novamente.
+          </div>
+          <button style={{ ...btn(t, "primary"), marginTop: 8 }} onClick={onCancel}>
+            Usar upload de ficheiro
+          </button>
+        </div>
+      )}
+
+      {/* In-app browser (WhatsApp, Instagram...) */}
+      {status === "inapp" && (
+        <div style={S.centerMsg}>
+          <div style={{ fontSize: 44 }}>📲</div>
+          <div style={{ fontWeight: 700, fontSize: 17 }}>
+            Abre no navegador do telemóvel
+          </div>
+          <div style={{ fontSize: 14, color: "rgba(255,255,255,0.65)", lineHeight: 1.55 }}>
+            Estás a usar a Fyziq dentro do {errorMsg}, que não permite
+            acesso à câmara.
+            <br /><br />
+            Toca nos <strong>três pontos (⋯)</strong> no canto e escolhe
+            <strong> "Abrir no Chrome"</strong> ou <strong>"Abrir no Safari"</strong>.
+            A câmara ao vivo funciona aí.
           </div>
           <button style={{ ...btn(t, "primary"), marginTop: 8 }} onClick={onCancel}>
             Usar upload de ficheiro

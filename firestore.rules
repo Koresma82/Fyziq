@@ -11,8 +11,6 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/superAdmins/$(request.auth.uid));
     }
 
-    // Campos que um profissional NÃO pode alterar em si próprio
-    // (plano, trial, contadores) — só o super admin os muda.
     function planFieldsUnchanged() {
       let protectedKeys = ['plan', 'trialEndsAt', 'role'];
       return !request.resource.data.diff(resource.data).affectedKeys()
@@ -21,14 +19,14 @@ service cloud.firestore {
 
     // ── Super Admins ─────────────────────────────────────────
     match /superAdmins/{uid} {
-      allow read:  if isAuth();           // a app verifica o próprio estatuto
-      allow write: if false;              // criado só via script (Admin SDK)
+      allow read:  if isAuth();
+      allow write: if false;
     }
 
-    // ── Config (limites de planos, editável pelo super admin) ─
+    // ── Config ───────────────────────────────────────────────
     match /config/{docId} {
-      allow read:  if isAuth();          // a app lê os limites efectivos
-      allow write: if isSuperAdmin();    // só o super admin edita
+      allow read:  if isAuth();
+      allow write: if isSuperAdmin();
     }
 
     // ── Professionals ────────────────────────────────────────
@@ -36,27 +34,28 @@ service cloud.firestore {
       allow get:    if isAuth() && (request.auth.uid == uid || isSuperAdmin());
       allow list:   if isSuperAdmin();
       allow create: if isAuth() && request.auth.uid == uid;
-      // O próprio pode atualizar dados, mas não plano/role/trial.
-      // O super admin pode atualizar tudo.
       allow update: if isSuperAdmin()
                     || (isAuth() && request.auth.uid == uid && planFieldsUnchanged());
       allow delete: if false;
     }
 
     // ── Patients ─────────────────────────────────────────────
+    // read = get + list. A condição é por documento; numa query,
+    // o cliente TEM de filtrar por ownerId para a query passar.
+    // O super admin não filtra e é autorizado por isSuperAdmin().
     match /patients/{patientId} {
-      allow get, list: if isAuth() &&
+      allow read:   if isAuth() &&
         (resource.data.ownerId == request.auth.uid || isSuperAdmin());
-      allow create:     if isAuth() && request.resource.data.ownerId == request.auth.uid;
+      allow create: if isAuth() && request.resource.data.ownerId == request.auth.uid;
       allow update, delete: if isAuth() &&
         (resource.data.ownerId == request.auth.uid || isSuperAdmin());
     }
 
     // ── Analyses ─────────────────────────────────────────────
     match /analyses/{analysisId} {
-      allow get, list: if isAuth() &&
+      allow read:   if isAuth() &&
         (resource.data.ownerId == request.auth.uid || isSuperAdmin());
-      allow create:     if isAuth() && request.resource.data.ownerId == request.auth.uid;
+      allow create: if isAuth() && request.resource.data.ownerId == request.auth.uid;
       allow update, delete: if isAuth() &&
         (resource.data.ownerId == request.auth.uid || isSuperAdmin());
     }

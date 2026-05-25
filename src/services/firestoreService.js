@@ -21,7 +21,13 @@ export async function createOrGetProfessional(firebaseUser) {
   const { uid, email, displayName, photoURL } = firebaseUser;
 
   const existing = await getProfessional(uid);
-  if (existing) return existing;
+  if (existing) {
+    // Regista o login (não bloqueia — corre em segundo plano)
+    updateDoc(doc(db, "professionals", uid), {
+      lastLoginAt: serverTimestamp(),
+    }).catch(() => {});
+    return existing;
+  }
 
   // Trial de 7 dias a contar de agora.
   const trialEnds = new Date();
@@ -35,11 +41,12 @@ export async function createOrGetProfessional(firebaseUser) {
     plan:      "trial",
     trialEndsAt: trialEnds,
     active:    true,
-    createdAt: serverTimestamp(),
+    createdAt:   serverTimestamp(),
+    lastLoginAt: serverTimestamp(),
     // Contadores de utilização (para limites e métricas)
     patientCount: 0,
-    analysisCount: 0,        // total acumulado
-    aiUsage: {},             // { "2026-05": 7, "2026-06": 3, ... }
+    analysisCount: 0,
+    aiUsage: {},
   };
 
   await setDoc(doc(db, "professionals", uid), data);
@@ -158,16 +165,97 @@ export async function isSuperAdmin(uid) {
   return snap.exists();
 }
 
-/** Lista todos os profissionais (só super admin) */
+/**
+ * Lista todos os profissionais (só super admin).
+ * Conta pacientes e análises REAIS. Cada query é protegida:
+ * se as rules bloquearem patients/analyses, ainda assim
+ * devolve a lista de profissionais (contadores a 0).
+ */
 export async function listAllProfessionals() {
-  const snap = await getDocs(collection(db, "professionals"));
-  return snap.docs
-    .map(d => ({ id: d.id, ...d.data() }))
+  const proSnap = await getDocs(collection(db, "professionals"));
+
+  // patients e analyses podem falhar se as rules não estiverem
+  // atualizadas — apanhamos o erro para não rebentar o painel.
+  let patSnap = { docs: [] }, anaSnap = { docs: [] };
+  try {
+    patSnap = await getDocs(collection(db, "patients"));
+  } catch (e) {
+    console.warn("listAllProfessionals: leitura de patients bloqueada —", e.code);
+  }
+  try {
+    anaSnap = await getDocs(collection(db, "analyses"));
+  } catch (e) {
+    console.warn("listAllProfessionals: leitura de analyses bloqueada —", e.code);
+  }
+
+  const patientsByOwner = {};
+  patSnap.docs.forEach(d => {
+    const p = d.data();
+    if (p.active === false) return;
+    patientsByOwner[p.ownerId] = (patientsByOwner[p.ownerId] || 0) + 1;
+  });
+
+  const analysesByOwner = {};
+  const aiUsageByOwner  = {};
+  anaSnap.docs.forEach(d => {
+    const a = d.data();
+    analysesByOwner[a.ownerId] = (analysesByOwner[a.ownerId] || 0) + 1;
+    const date = a.date?.toDate ? a.date.toDate() : new Date(a.date || 0);
+    const mk = currentMonthKey(date);
+    aiUsageByOwner[a.ownerId] = aiUsageByOwner[a.ownerId] || {};
+    aiUsageByOwner[a.ownerId][mk] = (aiUsageByOwner[a.ownerId][mk] || 0) + 1;
+  });
+
+  return proSnap.docs
+    .map(d => {
+      const data = d.data();
+      return {
+        id: d.id,
+        ...data,
+        // Valores REAIS sobrepõem os contadores guardados.
+        // Se a query falhou, recorre ao contador do documento.
+        patientCount:  patientsByOwner[d.id]  ?? data.patientCount  ?? 0,
+        analysisCount: analysesByOwner[d.id]  ?? data.analysisCount ?? 0,
+        aiUsage:       aiUsageByOwner[d.id]   ?? data.aiUsage       ?? {},
+      };
+    })
     .sort((a, b) => {
       const da = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(0);
       const db2 = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(0);
       return db2 - da;
     });
+}
+
+/**
+ * Detalhe completo de um profissional para o super admin:
+ * lista de pacientes + análises com datas.
+ */
+export async function getProfessionalDetail(uid) {
+  const [proSnap, patSnap, anaSnap] = await Promise.all([
+    getDoc(doc(db, "professionals", uid)),
+    getDocs(query(collection(db, "patients"),  where("ownerId", "==", uid))),
+    getDocs(query(collection(db, "analyses"),  where("ownerId", "==", uid))),
+  ]);
+
+  const patients = patSnap.docs
+    .map(d => ({ id: d.id, ...d.data() }))
+    .filter(p => p.active !== false);
+
+  const analyses = anaSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+  // Datas para "primeira" e "última" análise
+  const dates = analyses
+    .map(a => a.date?.toDate ? a.date.toDate() : new Date(a.date || 0))
+    .sort((a, b) => a - b);
+
+  return {
+    professional: proSnap.exists() ? { id: proSnap.id, ...proSnap.data() } : null,
+    patientCount:  patients.length,
+    analysisCount: analyses.length,
+    firstAnalysis: dates[0] || null,
+    lastAnalysis:  dates[dates.length - 1] || null,
+    patients,
+  };
 }
 
 /** Super admin: altera o plano de um profissional */

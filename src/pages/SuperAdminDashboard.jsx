@@ -3,7 +3,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { theme, btn } from "../config/theme";
 import {
   listAllProfessionals, setProfessionalPlan, setProfessionalActive,
-  savePlanConfig,
+  savePlanConfig, getProfessionalDetail,
 } from "../services/firestoreService";
 import {
   DEFAULT_PLANS, getPlans, getPlan, getAiCost,
@@ -13,15 +13,40 @@ import {
 const t = theme;
 const initials = (n) => n ? n.split(" ").map(w => w[0]).join("").slice(0,2).toUpperCase() : "?";
 
+function fmtDate(ts) {
+  if (!ts) return "—";
+  const d = ts?.toDate ? ts.toDate() : new Date(ts);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("pt-PT", {
+    day: "2-digit", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
+}
+
 export default function SuperAdminDashboard() {
   const { logout, planConfig, refreshPlanConfig } = useAuth();
 
   const [pros, setPros]         = useState([]);
   const [loading, setLoading]   = useState(true);
   const [selected, setSelected] = useState(null);
+  const [detail, setDetail]     = useState(null);   // detalhe completo carregado
+  const [detailLoading, setDetailLoading] = useState(false);
   const [busy, setBusy]         = useState(false);
   const [trialDays, setTrialDays] = useState(7);
   const [showLimits, setShowLimits] = useState(false);
+
+  // Abre o detalhe de um profissional
+  const openDetail = async (pro) => {
+    setSelected(pro);
+    setTrialDays(plans.trial.trialDays);
+    setDetail(null);
+    setDetailLoading(true);
+    try {
+      setDetail(await getProfessionalDetail(pro.id));
+    } finally {
+      setDetailLoading(false);
+    }
+  };
 
   // Limites efectivos (defaults + overrides do super admin)
   const plans  = getPlans(planConfig);
@@ -207,8 +232,8 @@ export default function SuperAdminDashboard() {
                         <td style={S.td}>${cost.toFixed(2)}</td>
                         <td style={S.td}>
                           <button style={{ ...btn(t, "ghost"), padding: "5px 12px", fontSize: 12 }}
-                            onClick={() => { setSelected(p); setTrialDays(plans.trial.trialDays); }}>
-                            Gerir
+                            onClick={() => openDetail(p)}>
+                            Detalhe
                           </button>
                         </td>
                       </tr>
@@ -221,57 +246,135 @@ export default function SuperAdminDashboard() {
         </div>
       </div>
 
-      {/* Manage professional modal */}
+      {/* Professional detail modal */}
       {selected && (
-        <div style={modalBg} onClick={() => setSelected(null)}>
+        <div style={modalBg} onClick={() => { setSelected(null); setDetail(null); }}>
           <div style={modalBox} onClick={e => e.stopPropagation()}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-              <span style={{ fontSize: 18, fontWeight: 800, color: t.navy }}>{selected.name}</span>
-              <button style={{ ...btn(t, "ghost"), padding: "5px 11px" }} onClick={() => setSelected(null)}>✕</button>
+            {/* Header */}
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
+              {selected.photoURL ? (
+                <img src={selected.photoURL} alt="" style={{ width: 52, height: 52, borderRadius: 14 }} />
+              ) : (
+                <div style={{
+                  width: 52, height: 52, borderRadius: 14,
+                  background: t.gradientSoft, color: t.teal,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 18, fontWeight: 800,
+                }}>{initials(selected.name)}</div>
+              )}
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 17, fontWeight: 800, color: t.navy }}>{selected.name}</div>
+                <div style={{ fontSize: 12, color: t.textSoft }}>{selected.email}</div>
+              </div>
+              <button style={{ ...btn(t, "ghost"), padding: "5px 11px" }}
+                onClick={() => { setSelected(null); setDetail(null); }}>✕</button>
             </div>
 
-            <div style={{
-              background: t.cardAlt, borderRadius: t.rMd, padding: 14, marginBottom: 16,
-              fontSize: 13, color: t.textMid, lineHeight: 1.7,
-            }}>
-              <div><strong>Plano atual:</strong> {(plans[effectivePlan(selected)] || plans.trial).label}</div>
-              <div><strong>Pacientes:</strong> {selected.patientCount || 0}</div>
-              <div><strong>Análises IA:</strong> {selected.analysisCount || 0}</div>
-              <div><strong>Custo estimado:</strong> ${((selected.analysisCount||0)*aiCost).toFixed(2)}</div>
-            </div>
+            {detailLoading ? (
+              <div style={{ padding: "30px 0", textAlign: "center", color: t.textSoft }}>
+                A carregar detalhe...
+              </div>
+            ) : (
+              <>
+                {/* Métricas em grelha */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+                  {[
+                    { label: "Pacientes", val: detail?.patientCount ?? selected.patientCount ?? 0, color: t.navy },
+                    { label: "Análises IA", val: detail?.analysisCount ?? selected.analysisCount ?? 0, color: t.blue },
+                    { label: "Custo IA total", val: `$${((detail?.analysisCount ?? 0) * aiCost).toFixed(2)}`, color: t.orange },
+                    { label: "Análises este mês", val: selected.aiUsage?.[month] || 0, color: t.teal },
+                  ].map(m => (
+                    <div key={m.label} style={{
+                      background: t.cardAlt, borderRadius: t.rMd, padding: "11px 13px",
+                    }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.4, color: t.textSoft, textTransform: "uppercase" }}>{m.label}</div>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: m.color, marginTop: 2 }}>{m.val}</div>
+                    </div>
+                  ))}
+                </div>
 
-            <label style={S.label}>Dias de trial (ao definir plano Trial)</label>
-            <input type="number" value={trialDays} min={1} max={90}
-              onChange={e => setTrialDays(parseInt(e.target.value) || 7)}
-              style={{ ...S.input, marginBottom: 16 }} />
+                {/* Datas / atividade */}
+                <div style={{
+                  background: t.cardAlt, borderRadius: t.rMd, padding: 13, marginBottom: 14,
+                  fontSize: 12.5, color: t.textMid, lineHeight: 1.9,
+                }}>
+                  <div><strong>Registado:</strong> {fmtDate(selected.createdAt)}</div>
+                  <div><strong>Último login:</strong> {fmtDate(selected.lastLoginAt)}</div>
+                  <div><strong>Última análise:</strong> {detail?.lastAnalysis ? fmtDate(detail.lastAnalysis) : "—"}</div>
+                  <div><strong>Estado:</strong> {selected.active === false
+                    ? <span style={{ color: t.red, fontWeight: 700 }}>Desativada</span>
+                    : <span style={{ color: t.green, fontWeight: 700 }}>Ativa</span>}</div>
+                  {selected.plan === "trial" && (
+                    <div><strong>Trial:</strong> {(() => {
+                      const d = trialDaysLeft(selected);
+                      return d > 0 ? `${d} dia(s) restantes` : "expirado";
+                    })()}</div>
+                  )}
+                </div>
 
-            <div style={{ ...S.label, marginBottom: 8 }}>Alterar plano</div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-              {Object.keys(plans).map(planId => {
-                const p = plans[planId];
-                const active = selected.plan === planId;
-                return (
-                  <button key={planId} disabled={busy}
-                    onClick={() => changePlan(selected.id, planId)}
-                    style={{
-                      flex: 1, padding: "10px 0", borderRadius: t.rSm,
-                      border: `1.5px solid ${active ? p.color : t.border}`,
-                      background: active ? `${p.color}15` : t.card,
-                      color: active ? p.color : t.textMid,
-                      fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: t.font,
-                    }}>{p.label}</button>
-                );
-              })}
-            </div>
+                {/* Lista de pacientes */}
+                {detail?.patients?.length > 0 && (
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ ...S.label, marginBottom: 6 }}>
+                      Pacientes ({detail.patients.length})
+                    </div>
+                    <div style={{
+                      maxHeight: 130, overflowY: "auto",
+                      border: `1px solid ${t.border}`, borderRadius: t.rSm,
+                    }}>
+                      {detail.patients.map(pt => (
+                        <div key={pt.id} style={{
+                          display: "flex", justifyContent: "space-between",
+                          padding: "7px 11px", fontSize: 12.5,
+                          borderBottom: `1px solid ${t.border}`,
+                        }}>
+                          <span style={{ fontWeight: 600, color: t.text }}>{pt.name}</span>
+                          <span style={{ color: t.textSoft }}>
+                            {pt.sex === "M" ? "♂" : "♀"} {pt.age}a
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
-            <button disabled={busy}
-              onClick={() => toggleActive(selected.id, !(selected.active !== false))}
-              style={{
-                ...btn(t, selected.active === false ? "primary" : "danger"),
-                width: "100%",
-              }}>
-              {selected.active === false ? "Reativar conta" : "Desativar conta"}
-            </button>
+                {/* Gestão de plano */}
+                <div style={{ ...S.label, marginBottom: 6 }}>
+                  Plano · atual: {(plans[effectivePlan(selected)] || plans.trial).label}
+                </div>
+                <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                  {Object.keys(plans).map(planId => {
+                    const p = plans[planId];
+                    const active = selected.plan === planId;
+                    return (
+                      <button key={planId} disabled={busy}
+                        onClick={() => changePlan(selected.id, planId)}
+                        style={{
+                          flex: 1, padding: "10px 0", borderRadius: t.rSm,
+                          border: `1.5px solid ${active ? p.color : t.border}`,
+                          background: active ? `${p.color}15` : t.card,
+                          color: active ? p.color : t.textMid,
+                          fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: t.font,
+                        }}>{p.label}</button>
+                    );
+                  })}
+                </div>
+
+                <label style={S.label}>Dias de trial (ao aplicar plano Trial)</label>
+                <input type="number" value={trialDays} min={1} max={90}
+                  onChange={e => setTrialDays(parseInt(e.target.value) || 7)}
+                  style={{ ...S.input, marginBottom: 14 }} />
+
+                <button disabled={busy}
+                  onClick={() => toggleActive(selected.id, !(selected.active !== false))}
+                  style={{
+                    ...btn(t, selected.active === false ? "primary" : "danger"),
+                    width: "100%",
+                  }}>
+                  {selected.active === false ? "Reativar conta" : "Desativar conta"}
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}

@@ -3,6 +3,7 @@ import { buildMetrics } from "../utils/calculations";
 import { processImageFile, formatBytes, dataUrlBytes } from "../utils/image";
 import { theme, btn } from "../config/theme";
 import CameraCapture from "./CameraCapture";
+import PoseEditor from "./PoseEditor";
 
 const t = theme;
 
@@ -30,6 +31,7 @@ export default function AnalysisForm({ patientProfile, onSave, onCancel }) {
   const [showCamera, setShowCamera] = useState(false);
   const [imgInfo, setImgInfo] = useState(null);   // info de processamento da imagem
   const [processing, setProcessing] = useState(false);
+  const [userPose, setUserPose] = useState(null); // esqueleto ajustado pelo utilizador
 
   // Ajuste da foto sob o esqueleto: zoom + deslocamento
   const [imgTransform, setImgTransform] = useState({ zoom: 1, x: 0, y: 0 });
@@ -76,18 +78,21 @@ export default function AnalysisForm({ patientProfile, onSave, onCancel }) {
     setStep("preview");
   };
 
-  // ── Envia para análise ──────────────────────────────────────
-  const analyze = async () => {
+  // ── Envia para análise (recebe a pose ajustada) ─────────────
+  const analyze = async (pose) => {
+    setUserPose(pose);
     setStep("analyzing");
     setError(null);
     const base64 = imageDataUrl.split(",")[1];
     try {
       const res = await fetch("/.netlify/functions/analyze", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageBase64: base64, mediaType, sex, height, weight, age }),
+        body: JSON.stringify({
+          imageBase64: base64, mediaType, sex, height, weight, age,
+          userPose: pose,   // esqueleto ajustado pelo utilizador
+        }),
       });
 
-      // Tenta ler JSON; se falhar, mensagem clara consoante o estado HTTP
       let data;
       try { data = await res.json(); }
       catch {
@@ -111,6 +116,9 @@ export default function AnalysisForm({ patientProfile, onSave, onCancel }) {
         }
         throw new Error(msg || `Erro na análise (HTTP ${res.status}).`);
       }
+
+      // Usa a pose ajustada pelo utilizador como landmarks finais
+      if (pose) data.landmarks = pose;
 
       if (!data.landmarks && !data.measurements) {
         throw new Error("Não foi detectada uma pessoa de corpo inteiro na foto. Garante que a pessoa aparece da cabeça aos pés.");
@@ -259,6 +267,17 @@ export default function AnalysisForm({ patientProfile, onSave, onCancel }) {
     );
   }
 
+  // Editor de esqueleto — ecrã inteiro, antes da análise.
+  if (step === "pose") {
+    return (
+      <PoseEditor
+        imageDataUrl={imageDataUrl}
+        onBack={() => setStep("preview")}
+        onConfirm={(pose) => analyze(pose)}
+      />
+    );
+  }
+
   return (
     <div style={S.overlay} onClick={onCancel}>
       <div style={S.sheet} onClick={e => e.stopPropagation()}>
@@ -377,7 +396,9 @@ export default function AnalysisForm({ patientProfile, onSave, onCancel }) {
                 onClick={() => { setImageDataUrl(null); setImgInfo(null); setError(null); setStep("photo"); }}>
                 ← Trocar
               </button>
-              <button style={{ ...btn(t, "primary"), flex: 2 }} onClick={analyze}>🔍 Analisar com IA</button>
+              <button style={{ ...btn(t, "primary"), flex: 2 }} onClick={() => setStep("pose")}>
+                ➜ Ajustar Esqueleto
+              </button>
             </div>
           </>
         )}
@@ -571,7 +592,7 @@ export default function AnalysisForm({ patientProfile, onSave, onCancel }) {
             </div>
 
             <div style={{ display: "flex", gap: 10 }}>
-              <button style={{ ...btn(t, "ghost"), flex: 1 }} onClick={() => { setStep("preview"); setAiResult(null); }}>← Refazer</button>
+              <button style={{ ...btn(t, "ghost"), flex: 1 }} onClick={() => { setStep("pose"); setAiResult(null); }}>← Refazer</button>
               <button style={{ ...btn(t, "primary"), flex: 2 }} onClick={handleSave} disabled={saving}>
                 {saving ? "A guardar..." : "💾 Guardar"}
               </button>
