@@ -91,7 +91,6 @@ export default function SuperAdminDashboard() {
       background: t.card, border: `1px solid ${t.border}`,
       borderRadius: t.rMd, padding: "14px 16px", boxShadow: t.shadowSm, flex: 1, minWidth: 140,
     },
-    th: { fontSize: 11, fontWeight: 800, letterSpacing: 0.5, color: t.textSoft, textTransform: "uppercase", textAlign: "left", padding: "8px 10px" },
     td: { fontSize: 13, color: t.text, padding: "10px", borderTop: `1px solid ${t.border}` },
     planPill: (planId) => {
       const p = plans[planId] || plans.trial;
@@ -180,67 +179,69 @@ export default function SuperAdminDashboard() {
               Ainda não há profissionais registados.
             </div>
           ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr>
-                    <th style={S.th}>Profissional</th>
-                    <th style={S.th}>Plano</th>
-                    <th style={S.th}>Pacientes</th>
-                    <th style={S.th}>Análises</th>
-                    <th style={S.th}>Mês</th>
-                    <th style={S.th}>Custo IA</th>
-                    <th style={S.th}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pros.map(p => {
-                    const eff = effectivePlan(p);
-                    const daysLeft = trialDaysLeft(p);
-                    const cost = (p.analysisCount || 0) * aiCost;
-                    return (
-                      <tr key={p.id} style={{ opacity: p.active === false ? 0.45 : 1 }}>
-                        <td style={S.td}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                            {p.photoURL ? (
-                              <img src={p.photoURL} alt="" style={{ width: 32, height: 32, borderRadius: 9 }} />
-                            ) : (
-                              <div style={{
-                                width: 32, height: 32, borderRadius: 9,
-                                background: t.gradientSoft, color: t.teal,
-                                display: "flex", alignItems: "center", justifyContent: "center",
-                                fontSize: 12, fontWeight: 800,
-                              }}>{initials(p.name)}</div>
-                            )}
-                            <div>
-                              <div style={{ fontWeight: 700, fontSize: 13 }}>{p.name}</div>
-                              <div style={{ fontSize: 11, color: t.textSoft }}>{p.email}</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td style={S.td}>
-                          <span style={S.planPill(eff)}>{(plans[eff] || plans.trial).label}</span>
-                          {p.plan === "trial" && daysLeft != null && (
-                            <div style={{ fontSize: 10, color: t.textSoft, marginTop: 3 }}>
-                              {daysLeft > 0 ? `${daysLeft}d restantes` : "expirado"}
-                            </div>
-                          )}
-                        </td>
-                        <td style={S.td}>{p.patientCount || 0}</td>
-                        <td style={S.td}>{p.analysisCount || 0}</td>
-                        <td style={S.td}>{p.aiUsage?.[month] || 0}</td>
-                        <td style={S.td}>${cost.toFixed(2)}</td>
-                        <td style={S.td}>
-                          <button style={{ ...btn(t, "ghost"), padding: "5px 12px", fontSize: 12 }}
-                            onClick={() => openDetail(p)}>
-                            Detalhe
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <div>
+              {pros.map(p => {
+                const eff = effectivePlan(p);
+                const daysLeft = trialDaysLeft(p);
+                const planObj = plans[eff] || plans.trial;
+                return (
+                  <div key={p.id}
+                    onClick={() => openDetail(p)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 12,
+                      padding: "13px 16px",
+                      borderTop: `1px solid ${t.border}`,
+                      cursor: "pointer",
+                      opacity: p.active === false ? 0.5 : 1,
+                      transition: "background 0.15s",
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = t.cardAlt}
+                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                  >
+                    {/* Avatar */}
+                    {p.photoURL ? (
+                      <img src={p.photoURL} alt="" style={{ width: 42, height: 42, borderRadius: 12, flexShrink: 0 }} />
+                    ) : (
+                      <div style={{
+                        width: 42, height: 42, borderRadius: 12, flexShrink: 0,
+                        background: t.gradientSoft, color: t.teal,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 15, fontWeight: 800,
+                      }}>{initials(p.name)}</div>
+                    )}
+
+                    {/* Nome + email + métricas */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14.5, fontWeight: 700, color: t.text }}>
+                        {p.name}
+                        {p.active === false && (
+                          <span style={{ fontSize: 10, color: t.red, fontWeight: 700, marginLeft: 6 }}>
+                            DESATIVADA
+                          </span>
+                        )}
+                      </div>
+                      <div style={{
+                        fontSize: 11.5, color: t.textSoft, marginTop: 1,
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      }}>{p.email}</div>
+                      <div style={{ fontSize: 11.5, color: t.textMid, marginTop: 3, fontWeight: 600 }}>
+                        {p.patientCount || 0} pacientes · {p.analysisCount || 0} análises
+                      </div>
+                    </div>
+
+                    {/* Plano + seta */}
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3, flexShrink: 0 }}>
+                      <span style={S.planPill(eff)}>{planObj.label}</span>
+                      {p.plan === "trial" && daysLeft != null && (
+                        <span style={{ fontSize: 10, color: t.textSoft }}>
+                          {daysLeft > 0 ? `${daysLeft}d restantes` : "expirado"}
+                        </span>
+                      )}
+                    </div>
+                    <span style={{ color: t.textSoft, fontSize: 20, flexShrink: 0 }}>›</span>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
