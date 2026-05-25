@@ -42,15 +42,27 @@ export default function PatientDetail() {
   };
   useEffect(() => { load(); }, [pid]);
 
-  const handleSaveAnalysis = async ({ imageDataUrl, mediaType, aiResult, metrics, notes, imgTransform }) => {
+  const handleSaveAnalysis = async ({ imageDataUrl, mediaType, images, aiResult, metrics, notes, imgTransform }) => {
     let imageUrl = null, imagePath = null;
+    const angleUrls = {};   // { front: url, left: url, ... }
     try {
+      // Foto frontal — imagem principal (compatível com análises antigas)
       const up = await uploadAnalysisImage(pid, imageDataUrl, mediaType);
       imageUrl = up.url; imagePath = up.path;
+      angleUrls.front = up.url;
+
+      // Restantes ângulos
+      for (const [angle, im] of Object.entries(images || {})) {
+        if (angle === "front") continue;
+        try {
+          const u = await uploadAnalysisImage(pid, im.dataUrl, im.mediaType || "image/jpeg");
+          angleUrls[angle] = u.url;
+        } catch (e) { console.error(`Upload ${angle}:`, e); }
+      }
     } catch (e) { console.error("Upload:", e); }
 
     await saveAnalysis(pid, user.uid, {
-      aiResult, metrics, notes, imageUrl, imagePath, imgTransform,
+      aiResult, metrics, notes, imageUrl, imagePath, imgTransform, angleUrls,
       patientSnapshot: {
         sex: patient.sex, age: patient.age, height: patient.height, weight: patient.weight,
       },

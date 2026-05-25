@@ -12,14 +12,21 @@ exports.handler = async (event) => {
   try { body = JSON.parse(event.body); }
   catch { return { statusCode: 400, body: JSON.stringify({ error: "Body inválido." }) }; }
 
-  const { imageBase64, mediaType, sex, height, weight, age } = body;
-  if (!imageBase64 || !height || !weight) {
+  // images: [{ angle: "front"|"back"|"left"|"right", base64, mediaType }]
+  const { images, sex, height, weight, age, userPose } = body;
+  if (!Array.isArray(images) || images.length === 0 || !height || !weight) {
     return { statusCode: 400, body: JSON.stringify({ error: "Parâmetros em falta." }) };
   }
 
   const sexLabel = sex === "M" ? "masculino" : "feminino";
+  const ANGLE_PT = {
+    front: "vista frontal", back: "vista posterior",
+    left: "perfil esquerdo", right: "perfil direito",
+  };
+  const anglesProvided = images.map(im => ANGLE_PT[im.angle] || im.angle).join(", ");
+  const hasProfile = images.some(im => im.angle === "left" || im.angle === "right");
 
-  const prompt = `És um especialista em avaliação postural e antropometria. Analisa esta fotografia de forma RIGOROSA, OBJECTIVA e CONSISTENTE.
+  const prompt = `És um especialista em avaliação postural e antropometria. Analisa estas fotografias de forma RIGOROSA, OBJECTIVA e CONSISTENTE.
 
 DADOS DO PACIENTE:
 - Sexo: ${sexLabel}
@@ -27,34 +34,37 @@ DADOS DO PACIENTE:
 - Peso: ${weight} kg
 - Idade: ${age} anos
 
-METODOLOGIA DE ANÁLISE (segue exactamente esta ordem):
+IMAGENS FORNECIDAS: ${anglesProvided}.
+Cada imagem é-te dada com uma etiqueta a indicar o ângulo. Usa TODAS para a análise.
 
-1. ESCALA: Usa a altura (${height} cm) como referência. Mede a altura total do corpo em pixels e calcula a proporção cm/pixel. Aplica essa proporção a TODAS as medições de perímetro.
+METODOLOGIA:
 
-2. PERÍMETROS: Estima cada circunferência observando a largura do corpo nesse ponto e multiplicando por π (assumindo secção aproximadamente elíptica). Sê consistente — para o mesmo corpo, os valores não devem variar.
+1. ESCALA: Usa a altura (${height} cm) como referência em cada vista. Mede a altura do corpo em pixels → proporção cm/pixel.
 
-3. POSTURA — avalia SISTEMATICAMENTE estes 8 pontos, cada um numa escala 0-100:
-   a) Alinhamento da cabeça (projecção anterior / inclinação lateral)
-   b) Nível dos ombros (simetria de altura esquerda/direita)
-   c) Alinhamento da coluna (curvatura, desvios laterais)
-   d) Posição da bacia (báscula anterior/posterior, rotação)
-   e) Alinhamento dos joelhos (valgo / varo)
-   f) Distribuição de peso (esquerda vs direita)
-   g) Posição dos pés (pronação / supinação aparente)
-   h) Simetria global (assimetrias entre os dois lados)
+2. PERÍMETROS (circunferências): ${hasProfile
+  ? `TENS vista frontal E de perfil. Para cada perímetro, mede a LARGURA na vista frontal e a PROFUNDIDADE na vista de perfil. Calcula a circunferência aproximando a uma elipse: perímetro ≈ π × [3(a+b) − √((3a+b)(a+3b))]/2, onde a e b são os semi-eixos (metade da largura e metade da profundidade). Isto dá uma estimativa MUITO mais precisa do que só com a vista frontal.`
+  : `Tens apenas vista(s) frontal/posterior. Estima a profundidade do corpo a partir do biótipo. Indica menor confiança.`}
 
-4. POSTURE SCORE: média ponderada dos 8 pontos acima.
+3. POSTURA — avalia SISTEMATICAMENTE, usando o ângulo certo para cada item:
+   - Vista frontal/posterior: nível dos ombros, alinhamento da bacia, joelhos (valgo/varo), simetria, desvios laterais da coluna (escoliose)
+   - Vista de perfil: projecção anterior da cabeça, cifose, lordose, báscula pélvica, alinhamento sagital
+   Avalia 8 pontos, cada um 0-100:
+   a) Cabeça  b) Ombros  c) Coluna  d) Bacia
+   e) Joelhos  f) Distribuição de peso  g) Pés  h) Simetria global
+
+4. POSTURE SCORE: média ponderada dos 8 pontos.
 
 REGRAS DE OUTPUT:
-- Responde APENAS com JSON válido, sem markdown, sem texto extra.
-- Todo o texto em português europeu.
-- Sê específico e clínico nas descrições — menciona a região anatómica e a implicação funcional.
-- severity: "low" (desvio ligeiro), "medium" (desvio moderado, merece atenção), "high" (desvio acentuado).
+- Responde APENAS com JSON válido, sem markdown nem texto extra.
+- Português europeu, linguagem clínica e específica.
+- severity: "low" | "medium" | "high".
+- Em cada problema/recomendação, indica a que vista se refere quando relevante.
 
 FORMATO JSON EXACTO:
 {
   "bodyVisible": true,
-  "viewAngle": "frontal",
+  "anglesAnalyzed": ["front","left"],
+  "measurementConfidence": "high",
   "postureScore": 72,
   "bodyFatEstimate": 18.5,
   "measurements": {
@@ -71,25 +81,27 @@ FORMATO JSON EXACTO:
     "feet":      { "score": 82, "label": "Posição dos pés" },
     "symmetry":  { "score": 74, "label": "Simetria global" }
   },
-  "landmarks": {
-    "nose": {"x":0.50,"y":0.07},
-    "left_shoulder": {"x":0.37,"y":0.26}, "right_shoulder": {"x":0.63,"y":0.26},
-    "left_elbow": {"x":0.30,"y":0.41}, "right_elbow": {"x":0.70,"y":0.41},
-    "left_wrist": {"x":0.27,"y":0.54}, "right_wrist": {"x":0.73,"y":0.54},
-    "left_hip": {"x":0.42,"y":0.54}, "right_hip": {"x":0.58,"y":0.54},
-    "left_knee": {"x":0.41,"y":0.73}, "right_knee": {"x":0.59,"y":0.73},
-    "left_ankle": {"x":0.40,"y":0.92}, "right_ankle": {"x":0.60,"y":0.92}
-  },
   "postureIssues": [
-    {"name":"Nome curto do problema","severity":"medium","region":"cervical","description":"Descrição clínica detalhada com região e implicação funcional."}
+    {"name":"Nome curto","severity":"medium","region":"cervical","view":"perfil","description":"Descrição clínica detalhada."}
   ],
   "postureStrengths": ["Aspecto postural positivo e específico"],
   "recommendations": ["Recomendação prática e accionável"],
   "bodyCompositionNote": "Nota sobre composição corporal.",
-  "summary": "Resumo executivo da avaliação em 1-2 frases."
+  "summary": "Resumo executivo em 1-2 frases."
 }
 
-Notas: x,y são coordenadas 0-1 (0,0 = canto superior esquerdo). Inclui apenas landmarks visíveis. viewAngle: frontal/lateral_left/lateral_right/posterior.`;
+measurementConfidence: "high" se tens frontal+perfil, "medium" caso contrário.`;
+
+  // Monta o content: cada imagem precedida de etiqueta de texto
+  const content = [];
+  for (const im of images) {
+    content.push({ type: "text", text: `[Imagem — ${ANGLE_PT[im.angle] || im.angle}]` });
+    content.push({
+      type: "image",
+      source: { type: "base64", media_type: im.mediaType || "image/jpeg", data: im.base64 },
+    });
+  }
+  content.push({ type: "text", text: prompt });
 
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -101,15 +113,9 @@ Notas: x,y são coordenadas 0-1 (0,0 = canto superior esquerdo). Inclui apenas l
       },
       body: JSON.stringify({
         model:       "claude-sonnet-4-20250514",
-        max_tokens:  2500,
+        max_tokens:  3000,
         temperature: 0,
-        messages: [{
-          role: "user",
-          content: [
-            { type: "image", source: { type: "base64", media_type: mediaType || "image/jpeg", data: imageBase64 } },
-            { type: "text", text: prompt },
-          ],
-        }],
+        messages: [{ role: "user", content }],
       }),
     });
 

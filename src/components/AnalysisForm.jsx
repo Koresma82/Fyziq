@@ -1,9 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { buildMetrics } from "../utils/calculations";
-import { processImageFile, formatBytes, dataUrlBytes } from "../utils/image";
 import { theme, btn } from "../config/theme";
-import CameraCapture from "./CameraCapture";
 import PoseEditor from "./PoseEditor";
+import MultiAngleCapture, { ANGLES } from "./MultiAngleCapture";
 
 const t = theme;
 
@@ -19,77 +18,56 @@ const CONNECTIONS = [
 ];
 
 export default function AnalysisForm({ patientProfile, onSave, onCancel }) {
-  const [step, setStep] = useState("photo");
-  const [imageDataUrl, setImageDataUrl] = useState(null);
-  const [mediaType, setMediaType] = useState("image/jpeg");
+  const [step, setStep] = useState("capture");   // capture → pose → analyzing → results
+  const [images, setImages] = useState({});       // { front:{dataUrl,mediaType,info}, left:{...}, ... }
   const [aiResult, setAiResult] = useState(null);
   const [error, setError] = useState(null);
   const [notes, setNotes] = useState("");
   const [showSkeleton, setShowSkeleton] = useState(true);
-  const [dragging, setDragging] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [showCamera, setShowCamera] = useState(false);
-  const [imgInfo, setImgInfo] = useState(null);   // info de processamento da imagem
-  const [processing, setProcessing] = useState(false);
   const [userPose, setUserPose] = useState(null); // esqueleto ajustado pelo utilizador
+  const [resultAngle, setResultAngle] = useState("front"); // ângulo visível nos resultados
 
   // Ajuste da foto sob o esqueleto: zoom + deslocamento
   const [imgTransform, setImgTransform] = useState({ zoom: 1, x: 0, y: 0 });
   const panRef = useRef({ active: false, startX: 0, startY: 0, baseX: 0, baseY: 0 });
 
-  const fileRef = useRef(null);
   const canvasRef = useRef(null);
   const imgRef = useRef(null);
   const stageRef = useRef(null);
 
   const { sex, height, weight, age } = patientProfile;
 
-  // ── Recebe ficheiro (upload) — redimensiona se necessário ───
-  const handleFile = async (file) => {
-    if (!file) return;
-    if (!file.type?.startsWith("image/")) {
-      setError("O ficheiro selecionado não é uma imagem.");
-      return;
-    }
-    setProcessing(true);
-    setError(null);
-    try {
-      const { dataUrl, mediaType: mt, info } = await processImageFile(file);
-      setImageDataUrl(dataUrl);
-      setMediaType(mt);
-      setImgInfo(info);
-      setAiResult(null);
-      setStep("preview");
-    } catch (err) {
-      setError(err.message || "Não foi possível processar a imagem.");
-    } finally {
-      setProcessing(false);
-    }
-  };
+  // Atalhos: foto frontal é a referência para o esqueleto
+  const frontImage   = images.front;
+  const imageDataUrl = frontImage?.dataUrl || null;
 
-  // ── Recebe foto da câmara ao vivo ───────────────────────────
-  const handleCameraCapture = (dataUrl) => {
-    setShowCamera(false);
-    setImageDataUrl(dataUrl);
-    setMediaType("image/jpeg");
-    setImgInfo({ finalBytes: dataUrlBytes(dataUrl), fromCamera: true });
+  // ── Recebe as fotos do MultiAngleCapture ────────────────────
+  const handleCaptureConfirm = (imgs) => {
+    setImages(imgs);
     setAiResult(null);
     setError(null);
-    setStep("preview");
+    setStep("pose");
   };
 
-  // ── Envia para análise (recebe a pose ajustada) ─────────────
+  // ── Envia para análise (multi-imagem + pose ajustada) ───────
   const analyze = async (pose) => {
     setUserPose(pose);
     setStep("analyzing");
     setError(null);
-    const base64 = imageDataUrl.split(",")[1];
+
+    // Monta o array de imagens com ângulo identificado
+    const imgArray = Object.entries(images).map(([angle, im]) => ({
+      angle,
+      base64: im.dataUrl.split(",")[1],
+      mediaType: im.mediaType || "image/jpeg",
+    }));
+
     try {
       const res = await fetch("/.netlify/functions/analyze", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          imageBase64: base64, mediaType, sex, height, weight, age,
-          userPose: pose,   // esqueleto ajustado pelo utilizador
+          images: imgArray, sex, height, weight, age, userPose: pose,
         }),
       });
 
@@ -112,24 +90,25 @@ export default function AnalysisForm({ patientProfile, onSave, onCancel }) {
           throw new Error("Limite de utilização da IA atingido. Tenta mais tarde.");
         }
         if (res.status === 413 || /too large|grande/i.test(msg)) {
-          throw new Error("A imagem é demasiado grande para análise. Usa uma foto mais pequena.");
+          throw new Error("As imagens são demasiado grandes. Usa fotos mais pequenas.");
         }
         throw new Error(msg || `Erro na análise (HTTP ${res.status}).`);
       }
 
-      // Usa a pose ajustada pelo utilizador como landmarks finais
+      // A pose ajustada pelo utilizador é a referência do esqueleto (foto frontal)
       if (pose) data.landmarks = pose;
 
       if (!data.landmarks && !data.measurements) {
-        throw new Error("Não foi detectada uma pessoa de corpo inteiro na foto. Garante que a pessoa aparece da cabeça aos pés.");
+        throw new Error("Não foi detectada uma pessoa de corpo inteiro nas fotos. Garante que a pessoa aparece da cabeça aos pés.");
       }
 
       setAiResult(data);
+      setResultAngle("front");
       setStep("results");
     } catch (err) {
       console.error("Analyze:", err);
       setError(err.message || "Erro inesperado na análise.");
-      setStep("preview");
+      setStep("pose");
     }
   };
 
@@ -140,7 +119,10 @@ export default function AnalysisForm({ patientProfile, onSave, onCancel }) {
       { sex, height: parseFloat(height), weight: parseFloat(weight), age: parseInt(age) },
       aiResult.measurements, aiResult.bodyFatEstimate,
     );
-    await onSave({ imageDataUrl, mediaType, aiResult, metrics, notes, imgTransform });
+    await onSave({
+      imageDataUrl, mediaType: frontImage?.mediaType || "image/jpeg",
+      images, aiResult, metrics, notes, imgTransform,
+    });
     setSaving(false);
   };
 
@@ -257,22 +239,22 @@ export default function AnalysisForm({ patientProfile, onSave, onCancel }) {
     metaLabel: { fontSize: 13, color: t.textMid, fontWeight: 600 },
   };
 
-  // Câmara ao vivo ocupa o ecrã inteiro — renderiza por cima de tudo.
-  if (showCamera) {
+  // Captura multi-ângulo — ecrã próprio.
+  if (step === "capture") {
     return (
-      <CameraCapture
-        onCapture={handleCameraCapture}
-        onCancel={() => setShowCamera(false)}
+      <MultiAngleCapture
+        onConfirm={handleCaptureConfirm}
+        onCancel={onCancel}
       />
     );
   }
 
-  // Editor de esqueleto — ecrã inteiro, antes da análise.
+  // Editor de esqueleto — ecrã inteiro, sobre a foto frontal.
   if (step === "pose") {
     return (
       <PoseEditor
         imageDataUrl={imageDataUrl}
-        onBack={() => setStep("preview")}
+        onBack={() => setStep("capture")}
         onConfirm={(pose) => analyze(pose)}
       />
     );
@@ -281,127 +263,6 @@ export default function AnalysisForm({ patientProfile, onSave, onCancel }) {
   return (
     <div style={S.overlay} onClick={onCancel}>
       <div style={S.sheet} onClick={e => e.stopPropagation()}>
-
-        {step === "photo" && (
-          <>
-            <div style={S.title}>Nova Análise</div>
-
-            {/* Câmara ao vivo */}
-            <button
-              onClick={() => { setError(null); setShowCamera(true); }}
-              style={{
-                ...btn(t, "primary"), width: "100%", padding: "16px",
-                fontSize: 15, marginBottom: 12,
-              }}>
-              📷 Câmara ao Vivo (com guia de esqueleto)
-            </button>
-
-            <div style={{
-              textAlign: "center", fontSize: 12, color: t.textSoft,
-              fontWeight: 600, margin: "4px 0 12px",
-            }}>— ou —</div>
-
-            {/* Upload de ficheiro */}
-            <div style={S.drop(dragging)}
-              onDrop={e => { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files[0]); }}
-              onDragOver={e => { e.preventDefault(); setDragging(true); }}
-              onDragLeave={() => setDragging(false)}
-              onClick={() => !processing && fileRef.current?.click()}>
-              {processing ? (
-                <>
-                  <div style={{
-                    width: 36, height: 36, margin: "0 auto 12px",
-                    border: `3px solid ${t.border}`, borderTopColor: t.teal,
-                    borderRadius: "50%", animation: "spin 0.8s linear infinite",
-                  }} />
-                  <div style={{ fontSize: 14, fontWeight: 600, color: t.textMid }}>
-                    A processar imagem...
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div style={{ fontSize: 40, marginBottom: 10 }}>🧍</div>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: t.text, marginBottom: 6 }}>
-                    Carregar foto de corpo inteiro
-                  </div>
-                  <div style={{ fontSize: 12.5, color: t.textSoft, lineHeight: 1.6, marginBottom: 16 }}>
-                    De frente ou lateral · Roupa justa · Boa iluminação<br />
-                    Fotos grandes são redimensionadas automaticamente
-                  </div>
-                  <button style={btn(t, "ghost")} onClick={e => { e.stopPropagation(); fileRef.current?.click(); }}>
-                    Escolher Ficheiro
-                  </button>
-                </>
-              )}
-              <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }}
-                onChange={e => handleFile(e.target.files[0])} />
-            </div>
-
-            {error && (
-              <div style={{
-                background: "rgba(239,68,68,0.07)", border: "1px solid rgba(239,68,68,0.25)",
-                borderRadius: t.rMd, padding: "11px 14px", marginTop: 12,
-                fontSize: 13, color: t.red, display: "flex", gap: 8,
-              }}>
-                <span>⚠️</span><span>{error}</span>
-              </div>
-            )}
-
-            <button style={{ ...btn(t, "ghost"), width: "100%", marginTop: 14 }} onClick={onCancel}>Cancelar</button>
-          </>
-        )}
-
-        {step === "preview" && (
-          <>
-            <div style={S.title}>Confirmar Foto</div>
-            <div style={S.imgWrap}>
-              <img src={imageDataUrl} alt="preview" style={{ width: "100%", display: "block" }} />
-            </div>
-
-            {/* Info da imagem processada */}
-            {imgInfo && (
-              <div style={{
-                display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12,
-              }}>
-                {imgInfo.fromCamera && (
-                  <span style={chipStyle(t.teal)}>📷 Capturada na câmara</span>
-                )}
-                {imgInfo.resized && (
-                  <span style={chipStyle(t.blue)}>
-                    ↓ Redimensionada {imgInfo.originalDimensions} → {imgInfo.finalDimensions}
-                  </span>
-                )}
-                {imgInfo.finalBytes != null && (
-                  <span style={chipStyle(t.textSoft)}>
-                    {formatBytes(imgInfo.finalBytes)}
-                    {imgInfo.originalBytes && imgInfo.originalBytes !== imgInfo.finalBytes &&
-                      ` (original ${formatBytes(imgInfo.originalBytes)})`}
-                  </span>
-                )}
-              </div>
-            )}
-
-            {error && (
-              <div style={{
-                background: "rgba(239,68,68,0.07)", border: "1px solid rgba(239,68,68,0.25)",
-                borderRadius: t.rMd, padding: "11px 14px", marginBottom: 14,
-                fontSize: 13, color: t.red, display: "flex", gap: 8, lineHeight: 1.45,
-              }}>
-                <span>⚠️</span><span>{error}</span>
-              </div>
-            )}
-
-            <div style={{ display: "flex", gap: 10 }}>
-              <button style={{ ...btn(t, "ghost"), flex: 1 }}
-                onClick={() => { setImageDataUrl(null); setImgInfo(null); setError(null); setStep("photo"); }}>
-                ← Trocar
-              </button>
-              <button style={{ ...btn(t, "primary"), flex: 2 }} onClick={() => setStep("pose")}>
-                ➜ Ajustar Esqueleto
-              </button>
-            </div>
-          </>
-        )}
 
         {step === "analyzing" && (
           <div style={{ textAlign: "center", padding: "44px 0" }}>
@@ -421,22 +282,43 @@ export default function AnalysisForm({ patientProfile, onSave, onCancel }) {
           <>
             <div style={S.title}>Resultado da Análise</div>
 
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <span style={{ fontSize: 12, color: t.textMid, fontWeight: 600 }}>Mostrar esqueleto</span>
-              <button style={{
-                width: 44, height: 24, borderRadius: 12, border: "none",
-                background: showSkeleton ? t.teal : t.border,
-                cursor: "pointer", position: "relative",
-              }} onClick={() => setShowSkeleton(s => !s)}>
-                <div style={{
-                  position: "absolute", width: 18, height: 18, background: "#fff",
-                  borderRadius: 9, top: 3, left: showSkeleton ? 23 : 3, transition: "left 0.2s",
-                  boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
-                }} />
-              </button>
-            </div>
+            {/* Seletor de ângulos (só os que existem) */}
+            {Object.keys(images).length > 1 && (
+              <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+                {ANGLES.filter(a => images[a.key]).map(a => (
+                  <button key={a.key}
+                    onClick={() => { setResultAngle(a.key); resetTransform(); }}
+                    style={{
+                      flex: 1, minWidth: 70, padding: "7px 4px",
+                      borderRadius: t.rSm,
+                      border: `1.5px solid ${resultAngle === a.key ? t.teal : t.border}`,
+                      background: resultAngle === a.key ? `${t.teal}12` : t.card,
+                      color: resultAngle === a.key ? t.teal : t.textMid,
+                      fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: t.font,
+                    }}>{a.label}</button>
+                ))}
+              </div>
+            )}
 
-            {/* Stage: foto arrastável por baixo, esqueleto fixo por cima */}
+            {/* Toggle esqueleto — só relevante na vista frontal */}
+            {resultAngle === "front" && (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <span style={{ fontSize: 12, color: t.textMid, fontWeight: 600 }}>Mostrar esqueleto</span>
+                <button style={{
+                  width: 44, height: 24, borderRadius: 12, border: "none",
+                  background: showSkeleton ? t.teal : t.border,
+                  cursor: "pointer", position: "relative",
+                }} onClick={() => setShowSkeleton(s => !s)}>
+                  <div style={{
+                    position: "absolute", width: 18, height: 18, background: "#fff",
+                    borderRadius: 9, top: 3, left: showSkeleton ? 23 : 3, transition: "left 0.2s",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                  }} />
+                </button>
+              </div>
+            )}
+
+            {/* Stage: foto arrastável; esqueleto só na vista frontal */}
             <div
               ref={stageRef}
               style={{
@@ -451,7 +333,9 @@ export default function AnalysisForm({ patientProfile, onSave, onCancel }) {
               onTouchMove={onTouchMove}
               onTouchEnd={endPan}
             >
-              <img ref={imgRef} src={imageDataUrl} alt="análise"
+              <img ref={imgRef}
+                src={images[resultAngle]?.dataUrl || imageDataUrl}
+                alt={`análise ${resultAngle}`}
                 draggable={false}
                 style={{
                   width: "100%", display: "block",
@@ -460,7 +344,8 @@ export default function AnalysisForm({ patientProfile, onSave, onCancel }) {
                   transition: panRef.current.active ? "none" : "transform 0.12s",
                 }}
                 onLoad={drawSkeleton} />
-              <canvas ref={canvasRef} style={S.canvas} />
+              <canvas ref={canvasRef}
+                style={{ ...S.canvas, display: resultAngle === "front" ? "block" : "none" }} />
             </div>
 
             {/* Controlos de ajuste da foto */}
@@ -483,6 +368,17 @@ export default function AnalysisForm({ patientProfile, onSave, onCancel }) {
 
             <div style={S.section}>
               <div style={S.sHdr}>Métricas Calculadas</div>
+              {aiResult.measurementConfidence && (
+                <div style={{
+                  fontSize: 11, fontWeight: 600,
+                  color: aiResult.measurementConfidence === "high" ? t.green : t.amber,
+                  marginBottom: 10, display: "flex", alignItems: "center", gap: 5,
+                }}>
+                  {aiResult.measurementConfidence === "high"
+                    ? "✓ Precisão alta — análise com frente + perfil"
+                    : "ⓘ Precisão média — junta uma foto de perfil para melhorar"}
+                </div>
+              )}
               {[
                 { label: "IMC", val: `${metrics.imc} kg/m²`, sub: metrics.imcCat?.label, color: metrics.imcCat?.color },
                 { label: "% Gordura", val: metrics.bf ? `${metrics.bf}%` : "—", sub: metrics.bfCat?.label, color: metrics.bfCat?.color },
