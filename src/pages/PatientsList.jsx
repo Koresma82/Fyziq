@@ -25,12 +25,14 @@ export default function PatientsList() {
   const [search,   setSearch]   = useState("");
 
   const load = async () => {
+    if (!user?.uid) return;
     setLoading(true);
     const p = await listPatients(user.uid);
     setPatients(p);
     setLoading(false);
   };
-  useEffect(() => { load(); }, []);
+  // Recarrega assim que o user.uid estiver disponível.
+  useEffect(() => { load(); }, [user?.uid]);
 
   const handleCreate = async () => {
     if (!form.name.trim()) return;

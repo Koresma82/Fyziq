@@ -40,7 +40,7 @@ export default function PatientDetail() {
   };
   useEffect(() => { load(); }, [pid]);
 
-  const handleSaveAnalysis = async ({ imageDataUrl, mediaType, aiResult, metrics, notes }) => {
+  const handleSaveAnalysis = async ({ imageDataUrl, mediaType, aiResult, metrics, notes, imgTransform }) => {
     let imageUrl = null, imagePath = null;
     try {
       const up = await uploadAnalysisImage(pid, imageDataUrl, mediaType);
@@ -48,7 +48,7 @@ export default function PatientDetail() {
     } catch (e) { console.error("Upload:", e); }
 
     await saveAnalysis(pid, user.uid, {
-      aiResult, metrics, notes, imageUrl, imagePath,
+      aiResult, metrics, notes, imageUrl, imagePath, imgTransform,
       patientSnapshot: {
         sex: patient.sex, age: patient.age, height: patient.height, weight: patient.weight,
       },
