@@ -112,7 +112,7 @@ measurementConfidence: "high" se tens frontal+perfil, "medium" caso contrário.`
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model:       "claude-sonnet-4-20250514",
+        model:       "claude-sonnet-4-5",
         max_tokens:  3000,
         temperature: 0,
         messages: [{ role: "user", content }],

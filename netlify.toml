@@ -33,6 +33,13 @@
   targetPort = 5173
 
 # SPA routing
+# Passa pedidos às Netlify Functions sem interferência do SPA rewrite.
+[[redirects]]
+  from   = "/.netlify/functions/*"
+  to     = "/.netlify/functions/:splat"
+  status = 200
+  force  = true
+
 [[redirects]]
   from   = "/*"
   to     = "/index.html"
