@@ -3,8 +3,8 @@
 //  Redimensiona/comprime fotos grandes antes de enviar à IA.
 // ─────────────────────────────────────────────────────────────
 
-const MAX_DIMENSION = 1568; // Claude processa bem até ~1568px no lado maior
-const TARGET_BYTES  = 4.5 * 1024 * 1024; // margem abaixo do limite 5MB da API
+const MAX_DIMENSION = 1280; // Suficiente para análise; mais pequeno = mais rápido
+const TARGET_BYTES  = 2.5 * 1024 * 1024; // ~2.5MB por imagem, evita timeouts
 
 /** Tamanho aproximado em bytes de uma dataURL base64 */
 export function dataUrlBytes(dataUrl) {

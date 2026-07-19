@@ -34,6 +34,14 @@
 
 # SPA routing
 # Passa pedidos às Netlify Functions sem interferência do SPA rewrite.
+
+# Timeout das funções (Pro: 26s; Free: máximo 10s)
+[functions]
+  node_bundler = "esbuild"
+
+[functions."analyze"]
+  timeout = 26
+
 [[redirects]]
   from   = "/.netlify/functions/*"
   to     = "/.netlify/functions/:splat"
